@@ -2,49 +2,67 @@ package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // event time zones must resolve in minimal containers too
 
-	"github.com/example/swe-api/internal/app"
-	"github.com/example/swe-api/internal/store"
+	"github.com/SWE-2026/biletflow-api/internal/auth"
+	"github.com/SWE-2026/biletflow-api/internal/config"
+	"github.com/SWE-2026/biletflow-api/internal/httpapi"
+	"github.com/SWE-2026/biletflow-api/internal/mail"
+	"github.com/SWE-2026/biletflow-api/internal/store"
 )
 
 func main() {
-	ctx := context.Background()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL is required")
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := run(logger); err != nil {
+		logger.Error("api stopped", "error", err)
+		os.Exit(1)
 	}
+}
 
-	db, err := store.NewPostgres(ctx, databaseURL)
+func run(logger *slog.Logger) error {
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.NewPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
 	}
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	server := app.New(db, 7*24*time.Hour)
-	go func() {
-		if err := server.Start(":" + port()); err != nil {
-			log.Printf("server stopped: %v", err)
+	codes := auth.NewCodes(db, mail.LogMailer{Logger: logger})
+	server := httpapi.New(db, codes, httpapi.Options{
+		SessionTTL:  7 * 24 * time.Hour,
+		ExposeCodes: cfg.IsLocal(),
+		CORSOrigins: cfg.CORSOrigins,
+		Logger:      logger,
+	})
+
+	errc := make(chan error, 1)
+	go func() { errc <- server.Start(":" + cfg.Port) }()
+	logger.Info("api listening", "port", cfg.Port, "env", cfg.Env)
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
 		}
-	}()
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = server.Shutdown(ctx)
-}
-
-func port() string {
-	if p := os.Getenv("PORT"); p != "" {
-		return p
+	case <-ctx.Done():
 	}
-	return "8080"
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return server.Shutdown(shutdownCtx)
 }
