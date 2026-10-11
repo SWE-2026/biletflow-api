@@ -1,19 +1,51 @@
+# Local / demo stack. `docker compose up --build` runs Postgres and the API;
+# `make db-up` starts only Postgres for running the API with `go run`.
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: swe
-      POSTGRES_USER: swe
-      POSTGRES_PASSWORD: swe
+      POSTGRES_DB: biletflow
+      POSTGRES_USER: biletflow
+      POSTGRES_PASSWORD: biletflow
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U swe -d swe"]
+      test: ["CMD-SHELL", "pg_isready -U biletflow -d biletflow"]
       interval: 5s
       timeout: 3s
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://biletflow:biletflow@postgres:5432/biletflow?sslmode=disable
+      APP_ENV: local
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081}
+    ports:
+      - "8080:8080"
+
+  # Throwaway database for DB-backed tests (`make test`); data is not persisted.
+  postgres-test:
+    image: postgres:17-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: biletflow_test
+      POSTGRES_USER: biletflow
+      POSTGRES_PASSWORD: biletflow
+    ports:
+      - "55433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biletflow -d biletflow_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
 
 volumes:
   postgres_data:
