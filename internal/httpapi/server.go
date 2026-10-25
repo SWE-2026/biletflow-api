@@ -60,6 +60,19 @@ func (s *Server) routes(v1 *echo.Group) {
 
 	v1.GET("/me", s.me, s.requireAuth)
 	v1.GET("/events", s.listEvents)
+
+	organizer := v1.Group("/organizer", s.requireAuth)
+	organizer.POST("/profile", s.createOrganizer)
+	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
+	organizer.PUT("/profile", s.updateOrganizer, s.requireOrganizer)
+	events := organizer.Group("/events", s.requireOrganizer)
+	events.POST("", s.createEvent)
+	events.GET("", s.listOrganizerEvents)
+	events.GET("/:id", s.getOrganizerEvent)
+	events.PUT("/:id", s.updateEvent)
+	events.POST("/:id/publish", s.publishEvent)
+	events.POST("/:id/unpublish", s.unpublishEvent)
+	events.POST("/:id/cancel", s.cancelEvent)
 }
 
 // authRateLimit slows down code and password guessing: about one request per second per IP, with bursts of 10.

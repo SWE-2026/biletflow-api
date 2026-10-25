@@ -31,3 +31,13 @@ func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 func currentUser(c echo.Context) store.User { return c.Get(ctxUser).(store.User) }
+
+func (s *Server) requireOrganizer(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		u := currentUser(c)
+		if u.Role != "organizer" || u.OrganizerID == nil {
+			return errForbidden
+		}
+		return next(c)
+	}
+}

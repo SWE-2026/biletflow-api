@@ -25,8 +25,9 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 |---|---|
 | 400 | `invalid_json`, `validation_failed`, `invalid_code` |
 | 401 | `unauthorized`, `invalid_credentials` |
+| 403 | `forbidden`, `email_unverified` |
 | 404 | `not_found` |
-| 409 | `email_taken` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -41,6 +42,17 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 **Challenge**: `{ expiresInSeconds, resendInSeconds, demoCode? }`. `demoCode` is present only when the
 API runs with `APP_ENV=local` (no email provider yet).
 
+**Organizer**: `{ id, type, name, contactEmail, contactPhone, payoutAccountReference, createdAt }`.
+`type` is `individual | business`. `payoutAccountReference` is an optional **demo label**, not a bank
+account number or payment credential. Creating a profile changes the current user's role to
+`organizer`; the response includes the updated user so clients can replace their stored session user.
+
+**Event**: `{ id, organizerId, title, description, category, imageUrl, venueName, venueAddress,
+timezone, visibility, capacity, status, startsAt, endsAt, registrationOpensAt,
+registrationClosesAt, createdAt, updatedAt }`. `visibility` is `public | unlisted | private` and
+`status` is `draft | published | cancelled`. Times are RFC 3339 values; the event's IANA `timezone`
+preserves its local scheduling context. A new event is always a draft.
+
 ## Endpoints
 
 Both sign-in styles reach the same account, matched by email. `/auth` is rate-limited per IP.
@@ -53,6 +65,34 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/auth/login` | `{email, password}` | 200 Session |
 | POST | `/auth/logout` 🔒 | — | 204 |
 | GET | `/me` 🔒 | — | `{user}` |
-| GET | `/events` | — | `{events}`: published events |
+| GET | `/events` | — | `{events}`: published **public** events |
+| POST | `/organizer/profile` 🔒 | Organizer input | 201 `{organizer, user}`; verified customer account only |
+| GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
+| PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
+| POST | `/organizer/events` 🔒 | Event input | 201 `{event}` in `draft` state |
+| GET | `/organizer/events` 🔒 | — | `{events}`: current organizer's events, all states |
+| GET | `/organizer/events/:id` 🔒 | — | `{event}` owned by current organizer |
+| PUT | `/organizer/events/:id` 🔒 | Event input | `{event}`; full replacement, except cancelled events |
+| POST | `/organizer/events/:id/publish` 🔒 | — | `{event}`; draft → published |
+| POST | `/organizer/events/:id/unpublish` 🔒 | — | `{event}`; published → draft |
+| POST | `/organizer/events/:id/cancel` 🔒 | — | `{event}`; draft/published → cancelled |
 
 Codes: valid 10 minutes, resend after 30 s, 5 attempts. Passwords: 8–72 characters.
+
+**Organizer input**: `{type, name, contactEmail, contactPhone?, payoutAccountReference?}`. The
+name and contact email are required. Email verification is required before creating a profile.
+An account that is already an organizer or has a staff/admin role receives `role_conflict`.
+
+**Event input** (for POST and PUT): `{title, description, category, imageUrl?, venueName,
+venueAddress, timezone, visibility, capacity, startsAt, endsAt, registrationOpensAt?,
+registrationClosesAt?}`. All fields except those marked `?` are required; `description` may be empty.
+`imageUrl` is an HTTP(S) URL or `null`. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
+registration close, when present, follows registration open and precedes the event start. Both PUT
+routes replace the complete editable resource rather than applying a partial patch. The API does
+not yet create tickets or take registrations, so changing capacity or event times currently has no
+downstream ticket constraints.
+
+All organizer event routes require a bearer session with role `organizer`. An event owned by another
+organizer returns 404, including for state changes. Invalid state transitions return 409
+`invalid_event_state`. A cancelled event cannot be edited or reopened. Private and unlisted events
+are excluded from the public `/events` list; attendee detail access is a later API feature.

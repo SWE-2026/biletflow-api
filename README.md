@@ -18,6 +18,10 @@ make run                           # API in local mode on :8080
 
 Migrations in `migrations/` are embedded in the binary and applied on start.
 
+Organizer profiles and event creation are available through `/api/v1/organizer`. Sign in with a
+verified email first, then create a profile. The API contract documents the required event fields
+and lifecycle actions. The local database also contains one sample published event.
+
 Local mode (`APP_ENV=local`) returns one-time email codes in responses as `demoCode`, because no
 email provider is configured yet.
 

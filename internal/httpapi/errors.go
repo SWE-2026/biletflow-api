@@ -30,6 +30,7 @@ var (
 	errNotFound     = newError(http.StatusNotFound, "not_found", "Not found.")
 	errInvalidJSON  = newError(http.StatusBadRequest, "invalid_json", "The request body is not valid JSON for this endpoint.")
 	errUnauthorized = newError(http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
+	errForbidden    = newError(http.StatusForbidden, "forbidden", "You do not have access to this action.")
 )
 
 // knownErrors maps domain errors from lower layers to API errors, so handlers can return them as is.
@@ -38,6 +39,9 @@ var knownErrors = []struct {
 	apiEr *Error
 }{
 	{store.ErrNotFound, errNotFound},
+	{store.ErrEmailUnverified, newError(http.StatusForbidden, "email_unverified", "Verify your email before creating an organizer profile.")},
+	{store.ErrRoleConflict, newError(http.StatusConflict, "role_conflict", "This account cannot create an organizer profile.")},
+	{store.ErrInvalidEventState, newError(http.StatusConflict, "invalid_event_state", "This action is not allowed for the event's current status.")},
 	{auth.ErrResendTooSoon, newError(http.StatusTooManyRequests, "resend_too_soon", "Please wait before requesting another code.")},
 	{auth.ErrCodeExpired, newError(http.StatusGone, "code_expired", "This code has expired. Request a new one.")},
 	{auth.ErrTooManyAttempts, newError(http.StatusTooManyRequests, "too_many_attempts", "Too many attempts. Request a new code.")},
