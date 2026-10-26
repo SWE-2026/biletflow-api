@@ -106,6 +106,13 @@ func (p *Postgres) ListTicketTypes(ctx context.Context, organizerID, eventID str
 		`SELECT `+ticketTypeColumns+` FROM ticket_types WHERE event_id=$1 ORDER BY sort_order, created_at, id`, eventID))
 }
 
+// ListVisibleTicketTypes returns the ticket types attendees can see; the caller checks the event is public.
+func (p *Postgres) ListVisibleTicketTypes(ctx context.Context, eventID string) ([]TicketType, error) {
+	return collectTicketTypes(p.pool.Query(ctx,
+		`SELECT `+ticketTypeColumns+` FROM ticket_types WHERE event_id=$1 AND NOT hidden
+		 ORDER BY sort_order, created_at, id`, eventID))
+}
+
 func (p *Postgres) CreateTicketType(ctx context.Context, organizerID, eventID string, in TicketTypeInput) (TicketType, error) {
 	var t TicketType
 	err := p.withEditableEvent(ctx, organizerID, eventID, func(tx pgx.Tx) error {

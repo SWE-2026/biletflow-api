@@ -62,6 +62,7 @@ func (s *Server) routes(v1 *echo.Group) {
 
 	v1.GET("/me", s.me, s.requireAuth)
 	v1.GET("/events", s.listEvents)
+	v1.GET("/events/:id", s.getPublicEvent)
 
 	organizer := v1.Group("/organizer", s.requireAuth)
 	organizer.POST("/profile", s.createOrganizer)

@@ -73,6 +73,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/auth/logout` 🔒 | — | 204 |
 | GET | `/me` 🔒 | — | `{user}` |
 | GET | `/events` | — | `{events}`: published **public** events |
+| GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
 | POST | `/organizer/profile` 🔒 | Organizer input | 201 `{organizer, user}`; verified customer account only |
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
@@ -118,5 +119,6 @@ The sum of all of an event's ticket type quantities may not exceed the event `ca
 All organizer event routes require a bearer session with role `organizer`. An event owned by another
 organizer returns 404, including for state changes and its ticket types. Invalid state transitions
 return 409 `invalid_event_state`. A cancelled event cannot be edited or reopened, and its ticket types
-cannot be created, changed or deleted. Private and unlisted events are excluded from the public
-`/events` list; attendee detail access is a later API feature.
+cannot be created, changed or deleted. Private events, drafts and cancelled events are excluded from
+both `/events` and `/events/:id`. Unlisted events are excluded from `/events` but can be opened by
+link through `/events/:id`.

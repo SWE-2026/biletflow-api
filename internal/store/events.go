@@ -94,6 +94,13 @@ func (p *Postgres) ListPublishedEvents(ctx context.Context) ([]Event, error) {
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) { return scanEvent(row) })
 }
 
+// PublicEvent returns a published event that attendees may open by link: public or unlisted.
+func (p *Postgres) PublicEvent(ctx context.Context, id string) (Event, error) {
+	return scanEvent(p.pool.QueryRow(ctx,
+		`SELECT `+eventColumns+` FROM events
+		 WHERE id=$1 AND status='published' AND visibility IN ('public','unlisted')`, id))
+}
+
 // UpdateEvent replaces the event's editable fields. Capacity cannot drop below the event's total
 // ticket type quantity.
 func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, id string, in EventInput) (Event, error) {

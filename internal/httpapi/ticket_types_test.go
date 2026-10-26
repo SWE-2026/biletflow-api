@@ -79,6 +79,11 @@ type ticketTypeResponse struct {
 	TicketType store.TicketType `json:"ticketType"`
 }
 
+type publicEventResponse struct {
+	Event       store.Event        `json:"event"`
+	TicketTypes []store.TicketType `json:"ticketTypes"`
+}
+
 func createEvent(t *testing.T, c client, in store.EventInput) string {
 	t.Helper()
 	var created struct {
@@ -150,6 +155,42 @@ func TestTicketTypeIsolation(t *testing.T) {
 	otherTypes := "/api/v1/organizer/events/" + createEvent(t, owner, eventInput("public")) + "/ticket-types"
 	owner.do(http.MethodPut, otherTypes+"/"+created.TicketType.ID, ticketTypeInput("Moved", 1), http.StatusNotFound, nil)
 	owner.do(http.MethodDelete, otherTypes+"/"+created.TicketType.ID, nil, http.StatusNotFound, nil)
+}
+
+func TestPublicEventDetail(t *testing.T) {
+	e := newDBServer(t)
+	owner := createOrganizerClient(t, e, "public-detail")
+	anonymous := client{t: t, e: e}
+	eventID := createEvent(t, owner, eventInput("public"))
+	eventPath := "/api/v1/organizer/events/" + eventID
+	owner.do(http.MethodPost, eventPath+"/ticket-types", ticketTypeInput("General", 10), http.StatusCreated, nil)
+	hidden := ticketTypeInput("Comp", 5)
+	hidden.Hidden = true
+	owner.do(http.MethodPost, eventPath+"/ticket-types", hidden, http.StatusCreated, nil)
+
+	publicPath := "/api/v1/events/" + eventID
+	anonymous.do(http.MethodGet, publicPath, nil, http.StatusNotFound, nil)
+	owner.do(http.MethodPost, eventPath+"/publish", nil, http.StatusOK, nil)
+	var detail publicEventResponse
+	anonymous.do(http.MethodGet, publicPath, nil, http.StatusOK, &detail)
+	if detail.Event.ID != eventID || len(detail.TicketTypes) != 1 || detail.TicketTypes[0].Name != "General" {
+		t.Fatalf("unexpected public detail: %+v", detail)
+	}
+
+	tests := []struct {
+		visibility string
+		wantStatus int
+	}{
+		{visibility: "unlisted", wantStatus: http.StatusOK},
+		{visibility: "private", wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		owner.do(http.MethodPut, eventPath, eventInput(tt.visibility), http.StatusOK, nil)
+		anonymous.do(http.MethodGet, publicPath, nil, tt.wantStatus, nil)
+	}
+	owner.do(http.MethodPost, eventPath+"/cancel", nil, http.StatusOK, nil)
+	anonymous.do(http.MethodGet, publicPath, nil, http.StatusNotFound, nil)
+	anonymous.do(http.MethodGet, "/api/v1/events/not-a-uuid", nil, http.StatusNotFound, nil)
 }
 
 func TestTicketTypeCapacityIsAtomic(t *testing.T) {
