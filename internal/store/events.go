@@ -94,16 +94,26 @@ func (p *Postgres) ListPublishedEvents(ctx context.Context) ([]Event, error) {
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) { return scanEvent(row) })
 }
 
+// UpdateEvent replaces the event's editable fields. Capacity cannot drop below the event's total
+// ticket type quantity.
 func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, id string, in EventInput) (Event, error) {
-	e, err := scanEvent(p.pool.QueryRow(ctx,
-		`UPDATE events SET title=$3, description=$4, category=$5, image_url=$6, venue_name=$7,
-		 venue_address=$8, timezone=$9, visibility=$10, capacity=$11, starts_at=$12, ends_at=$13,
-		 registration_opens_at=$14, registration_closes_at=$15, updated_at=now()
-		 WHERE id=$1 AND organizer_id=$2 AND status <> 'cancelled' RETURNING `+eventColumns,
-		id, organizerID, in.Title, in.Description, in.Category, in.ImageURL, in.VenueName,
-		in.VenueAddress, in.Timezone, in.Visibility, in.Capacity, in.StartsAt, in.EndsAt,
-		in.RegistrationOpensAt, in.RegistrationClosesAt))
-	return e, p.eventMutationError(ctx, organizerID, id, err)
+	var e Event
+	err := p.withEditableEvent(ctx, organizerID, id, func(tx pgx.Tx) error {
+		if err := checkCapacity(ctx, tx, id, "", in.Capacity, 0); err != nil {
+			return err
+		}
+		var err error
+		e, err = scanEvent(tx.QueryRow(ctx,
+			`UPDATE events SET title=$2, description=$3, category=$4, image_url=$5, venue_name=$6,
+			 venue_address=$7, timezone=$8, visibility=$9, capacity=$10, starts_at=$11, ends_at=$12,
+			 registration_opens_at=$13, registration_closes_at=$14, updated_at=now()
+			 WHERE id=$1 RETURNING `+eventColumns,
+			id, in.Title, in.Description, in.Category, in.ImageURL, in.VenueName,
+			in.VenueAddress, in.Timezone, in.Visibility, in.Capacity, in.StartsAt, in.EndsAt,
+			in.RegistrationOpensAt, in.RegistrationClosesAt))
+		return err
+	})
+	return e, err
 }
 
 func (p *Postgres) TransitionEvent(ctx context.Context, organizerID, id, from, to string) (Event, error) {

@@ -75,6 +75,10 @@ func (s *Server) routes(v1 *echo.Group) {
 	events.POST("/:id/publish", s.publishEvent)
 	events.POST("/:id/unpublish", s.unpublishEvent)
 	events.POST("/:id/cancel", s.cancelEvent)
+	events.GET("/:id/ticket-types", s.listTicketTypes)
+	events.POST("/:id/ticket-types", s.createTicketType)
+	events.PUT("/:id/ticket-types/:typeId", s.updateTicketType)
+	events.DELETE("/:id/ticket-types/:typeId", s.deleteTicketType)
 }
 
 // authRateLimit slows down code and password guessing: about one request per second per IP, with bursts of 10.

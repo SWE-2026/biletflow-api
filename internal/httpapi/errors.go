@@ -42,6 +42,8 @@ var knownErrors = []struct {
 	{store.ErrEmailUnverified, newError(http.StatusForbidden, "email_unverified", "Verify your email before creating an organizer profile.")},
 	{store.ErrRoleConflict, newError(http.StatusConflict, "role_conflict", "This account cannot create an organizer profile.")},
 	{store.ErrInvalidEventState, newError(http.StatusConflict, "invalid_event_state", "This action is not allowed for the event's current status.")},
+	{store.ErrCapacityExceeded, newError(http.StatusConflict, "capacity_exceeded", "Ticket quantities would exceed the event capacity.")},
+	{store.ErrTicketTypeInUse, newError(http.StatusConflict, "ticket_type_in_use", "This ticket type already has orders and cannot be deleted.")},
 	{auth.ErrResendTooSoon, newError(http.StatusTooManyRequests, "resend_too_soon", "Please wait before requesting another code.")},
 	{auth.ErrCodeExpired, newError(http.StatusGone, "code_expired", "This code has expired. Request a new one.")},
 	{auth.ErrTooManyAttempts, newError(http.StatusTooManyRequests, "too_many_attempts", "Too many attempts. Request a new code.")},

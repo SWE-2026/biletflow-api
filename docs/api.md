@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified` |
 | 404 | `not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -52,6 +52,11 @@ timezone, visibility, capacity, status, startsAt, endsAt, registrationOpensAt,
 registrationClosesAt, createdAt, updatedAt }`. `visibility` is `public | unlisted | private` and
 `status` is `draft | published | cancelled`. Times are RFC 3339 values; the event's IANA `timezone`
 preserves its local scheduling context. A new event is always a draft.
+
+**TicketType**: `{ id, eventId, name, description, priceAmount, quantity, salesStartsAt,
+salesEndsAt, maxPerOrder, hidden, sortOrder, createdAt, updatedAt }`. `priceAmount` is whole KZT
+(0 = free). `salesStartsAt`/`salesEndsAt` are `null` when unrestricted. Hidden types are left out
+of the attendee event page. Lists are ordered by `sortOrder`, then creation time.
 
 ## Endpoints
 
@@ -78,6 +83,10 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/organizer/events/:id/publish` 🔒 | — | `{event}`; draft → published |
 | POST | `/organizer/events/:id/unpublish` 🔒 | — | `{event}`; published → draft |
 | POST | `/organizer/events/:id/cancel` 🔒 | — | `{event}`; draft/published → cancelled |
+| GET | `/organizer/events/:id/ticket-types` 🔒 | — | `{ticketTypes}`: all of the event's types, hidden included |
+| POST | `/organizer/events/:id/ticket-types` 🔒 | TicketType input | 201 `{ticketType}` |
+| PUT | `/organizer/events/:id/ticket-types/:typeId` 🔒 | TicketType input | `{ticketType}`; full replacement |
+| DELETE | `/organizer/events/:id/ticket-types/:typeId` 🔒 | — | 204; only while the type has no orders |
 
 Codes: valid 10 minutes, resend after 30 s, 5 attempts. Passwords: 8–72 characters.
 
@@ -96,11 +105,18 @@ venueAddress, timezone, visibility, capacity, startsAt, endsAt, registrationOpen
 registrationClosesAt?}`. All fields except those marked `?` are required; `description` may be empty.
 `imageUrl` is an HTTP(S) URL or `null`. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
 registration close, when present, follows registration open and precedes the event start. Both PUT
-routes replace the complete editable resource rather than applying a partial patch. The API does
-not yet create tickets or take registrations, so changing capacity or event times currently has no
-downstream ticket constraints.
+routes replace the complete editable resource rather than applying a partial patch. `capacity`
+cannot drop below the sum of the event's ticket type quantities (409 `capacity_exceeded`).
+
+**TicketType input** (for POST and PUT): `{name, description, priceAmount, quantity,
+salesStartsAt?, salesEndsAt?, maxPerOrder, hidden, sortOrder}`. `name` is 1–100 characters,
+`description` up to 2000 and may be empty. `priceAmount` is 0–10,000,000, `quantity` is 1–1,000,000,
+`maxPerOrder` is 1–100, `sortOrder` is 0–10,000. Sales end, when both are set, follows sales start.
+The sum of all of an event's ticket type quantities may not exceed the event `capacity` (409
+`capacity_exceeded`). Storing a price does not enable paid sales; checkout is a later feature.
 
 All organizer event routes require a bearer session with role `organizer`. An event owned by another
-organizer returns 404, including for state changes. Invalid state transitions return 409
-`invalid_event_state`. A cancelled event cannot be edited or reopened. Private and unlisted events
-are excluded from the public `/events` list; attendee detail access is a later API feature.
+organizer returns 404, including for state changes and its ticket types. Invalid state transitions
+return 409 `invalid_event_state`. A cancelled event cannot be edited or reopened, and its ticket types
+cannot be created, changed or deleted. Private and unlisted events are excluded from the public
+`/events` list; attendee detail access is a later API feature.
