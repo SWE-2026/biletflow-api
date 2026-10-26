@@ -63,6 +63,8 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/auth/otp/verify` | `{email, code}` | 200 Session: creates the account on first sign-in, marks the email verified |
 | POST | `/auth/signup` | `{email, password, displayName}` | 201 Session |
 | POST | `/auth/login` | `{email, password}` | 200 Session |
+| POST | `/auth/password/reset/request` | `{email}` | 200 Challenge: emails a 6-digit reset code |
+| POST | `/auth/password/reset/confirm` | `{email, code, password}` | 200 Session: sets the password, signs out every other session |
 | POST | `/auth/logout` 🔒 | — | 204 |
 | GET | `/me` 🔒 | — | `{user}` |
 | GET | `/events` | — | `{events}`: published **public** events |
@@ -78,6 +80,12 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/organizer/events/:id/cancel` 🔒 | — | `{event}`; draft/published → cancelled |
 
 Codes: valid 10 minutes, resend after 30 s, 5 attempts. Passwords: 8–72 characters.
+
+**Password reset**: an unknown email still gets a 200 Challenge (without `demoCode`) and no email,
+so the endpoint does not reveal which accounts exist. Reset codes and sign-in codes are separate:
+one cannot be used for the other. Confirming a reset also sets a first password on a code-only
+account, marks the email verified and revokes all existing sessions. The password is validated
+before the code, so a `validation_failed` response does not spend an attempt.
 
 **Organizer input**: `{type, name, contactEmail, contactPhone?, payoutAccountReference?}`. The
 name and contact email are required. Email verification is required before creating a profile.

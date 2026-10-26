@@ -137,3 +137,26 @@ func TestCodesVerifyFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeMessageSubjectByPurpose(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		give string
+		want string
+	}{
+		{give: PurposeSignIn, want: "Your BiletFlow sign-in code"},
+		{give: PurposePasswordReset, want: "Your BiletFlow password reset code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.give, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture()
+			if _, err := f.codes.Request(context.Background(), "a@b.kz", tt.give); err != nil {
+				t.Fatal(err)
+			}
+			if got := f.mailer.sent[0].Subject; got != tt.want {
+				t.Fatalf("subject = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

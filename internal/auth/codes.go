@@ -17,8 +17,11 @@ import (
 	"github.com/SWE-2026/biletflow-api/internal/store"
 )
 
-// Code purposes. Each purpose has its own code; only sign-in exists today.
-const PurposeSignIn = "sign_in"
+// Code purposes. Each purpose has its own code.
+const (
+	PurposeSignIn        = "sign_in"
+	PurposePasswordReset = "password_reset"
+)
 
 const (
 	CodeLength  = 6
@@ -86,7 +89,7 @@ func (c *Codes) Request(ctx context.Context, email, purpose string) (Challenge, 
 	if err := c.store.PutEmailCode(ctx, rec); err != nil {
 		return Challenge{}, fmt.Errorf("store code: %w", err)
 	}
-	if err := c.mailer.Send(ctx, codeMessage(email, code)); err != nil {
+	if err := c.mailer.Send(ctx, codeMessage(email, purpose, code)); err != nil {
 		return Challenge{}, fmt.Errorf("send code: %w", err)
 	}
 	return Challenge{ExpiresIn: CodeTTL, ResendIn: ResendAfter, Code: code}, nil
@@ -126,8 +129,11 @@ func hashCode(email, purpose, code string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func codeMessage(email, code string) mail.Message {
+func codeMessage(email, purpose, code string) mail.Message {
 	subject := "Your BiletFlow sign-in code"
+	if purpose == PurposePasswordReset {
+		subject = "Your BiletFlow password reset code"
+	}
 	body := fmt.Sprintf("Your code is %s. It expires in %d minutes.\n\nIf you did not request it, ignore this email.",
 		code, int(CodeTTL.Minutes()))
 	return mail.Message{To: email, Subject: subject, Text: body}

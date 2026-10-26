@@ -49,3 +49,19 @@ func (p *Postgres) UserByEmail(ctx context.Context, email string) (User, error) 
 func (p *Postgres) UserByID(ctx context.Context, id string) (User, error) {
 	return scanUser(p.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id=$1`, id))
 }
+
+func (p *Postgres) ResetPassword(ctx context.Context, email, passwordHash string) (User, error) {
+	var u User
+	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
+		var err error
+		u, err = scanUser(tx.QueryRow(ctx,
+			`UPDATE users SET password_hash=$2, email_verified_at=COALESCE(email_verified_at, now())
+			 WHERE email=lower($1) RETURNING `+userColumns, email, passwordHash))
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, u.ID)
+		return err
+	})
+	return u, err
+}

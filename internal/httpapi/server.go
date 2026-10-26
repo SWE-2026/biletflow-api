@@ -56,6 +56,8 @@ func (s *Server) routes(v1 *echo.Group) {
 	authGroup.POST("/otp/verify", s.verifySignInCode)
 	authGroup.POST("/signup", s.signup)
 	authGroup.POST("/login", s.login)
+	authGroup.POST("/password/reset/request", s.requestPasswordReset)
+	authGroup.POST("/password/reset/confirm", s.confirmPasswordReset)
 	authGroup.POST("/logout", s.logout, s.requireAuth)
 
 	v1.GET("/me", s.me, s.requireAuth)
