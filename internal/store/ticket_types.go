@@ -144,6 +144,9 @@ func (p *Postgres) UpdateTicketType(ctx context.Context, organizerID, eventID, i
 		if err := checkCapacity(ctx, tx, eventID, id, capacity, in.Quantity); err != nil {
 			return err
 		}
+		if err := checkNotBelowSold(ctx, tx, eventID, id, in.Quantity); err != nil {
+			return err
+		}
 		t, err = scanTicketType(tx.QueryRow(ctx,
 			`UPDATE ticket_types SET name=$3, description=$4, price_amount=$5, quantity=$6,
 			 sales_starts_at=$7, sales_ends_at=$8, max_per_order=$9, hidden=$10, sort_order=$11,
@@ -154,6 +157,25 @@ func (p *Postgres) UpdateTicketType(ctx context.Context, organizerID, eventID, i
 		return err
 	})
 	return t, err
+}
+
+// checkNotBelowSold locks the ticket type, waiting out any registration in progress, and fails
+// when quantity is below the tickets already sold.
+func checkNotBelowSold(ctx context.Context, tx pgx.Tx, eventID, id string, quantity int) error {
+	var exists bool
+	err := tx.QueryRow(ctx,
+		`SELECT true FROM ticket_types WHERE id=$1 AND event_id=$2 FOR UPDATE`, id, eventID).Scan(&exists)
+	if err != nil {
+		return notFound(err)
+	}
+	sold, _, err := soldTickets(ctx, tx, id, "")
+	if err != nil {
+		return err
+	}
+	if quantity < sold {
+		return ErrQuantityBelowSold
+	}
+	return nil
 }
 
 func (p *Postgres) DeleteTicketType(ctx context.Context, organizerID, eventID, id string) error {

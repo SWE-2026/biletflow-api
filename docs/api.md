@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified` |
 | 404 | `not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -72,8 +72,10 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/auth/password/reset/confirm` | `{email, code, password}` | 200 Session: sets the password, signs out every other session |
 | POST | `/auth/logout` 🔒 | — | 204 |
 | GET | `/me` 🔒 | — | `{user}` |
+| GET | `/me/tickets` 🔒 | — | `{tickets}`: the current user's tickets, ordered by event start |
 | GET | `/events` | — | `{events}`: published **public** events |
 | GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
+| POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
 | POST | `/organizer/profile` 🔒 | Organizer input | 201 `{organizer, user}`; verified customer account only |
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
@@ -115,6 +117,8 @@ salesStartsAt?, salesEndsAt?, maxPerOrder, hidden, sortOrder}`. `name` is 1–10
 `maxPerOrder` is 1–100, `sortOrder` is 0–10,000. Sales end, when both are set, follows sales start.
 The sum of all of an event's ticket type quantities may not exceed the event `capacity` (409
 `capacity_exceeded`). Storing a price does not enable paid sales; checkout is a later feature.
+`quantity` cannot drop below the tickets already issued for the type (409 `quantity_below_sold`), and
+a type with orders cannot be deleted (409 `ticket_type_in_use`).
 
 All organizer event routes require a bearer session with role `organizer`. An event owned by another
 organizer returns 404, including for state changes and its ticket types. Invalid state transitions
@@ -122,3 +126,23 @@ return 409 `invalid_event_state`. A cancelled event cannot be edited or reopened
 cannot be created, changed or deleted. Private events, drafts and cancelled events are excluded from
 both `/events` and `/events/:id`. Unlisted events are excluded from `/events` but can be opened by
 link through `/events/:id`.
+
+**Registration** (`POST /events/:id/register`): `ticketTypeId` is a visible ticket type of that
+event, and `quantity` is 1–100. The account must have a verified email (403 `email_unverified`). The
+event must be published and public or unlisted; otherwise, or for a hidden type or a type of another
+event, the response is 404. Checks run in this order, each a 409:
+
+1. `payment_required`: the type has a price above 0. Only free types can be registered for now.
+2. `registration_closed`: outside the type's sales window or the event's registration window, or the
+   event has started.
+3. `ticket_limit_reached`: the account's tickets of this type would exceed `maxPerOrder`. The limit
+   counts all of the account's registrations for the type, not only this request.
+4. `sold_out`: fewer than `quantity` tickets of the type are left.
+
+Success creates one completed order (`totalAmount` 0) and `quantity` tickets with status `valid`.
+Concurrent registrations never oversell a ticket type.
+
+**Ticket**: `{ id, status, qrToken, createdAt, orderId, ticketTypeId, ticketTypeName, event: { id,
+title, status, venueName, venueAddress, timezone, startsAt, endsAt } }`. `status` is
+`valid | used | cancelled`. `qrToken` is the secret encoded in the ticket's QR code; clients show it
+only to the ticket owner and never log it.
