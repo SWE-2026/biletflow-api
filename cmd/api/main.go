@@ -67,6 +67,7 @@ func run(logger *slog.Logger) error {
 		CORSOrigins: cfg.CORSOrigins,
 		Logger:      logger,
 		WebURL:      cfg.WebURL,
+		TrustProxy:  cfg.TrustProxy,
 	})
 
 	dispatchCtx, stopDispatch := context.WithCancel(context.Background())

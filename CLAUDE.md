@@ -6,7 +6,7 @@ organizers, Event Admins, platform admins). Clients: `biletflow-frontend` (React
 
 ## Stack
 
-- Go (module `github.com/SWE-2026/biletflow-api`, `go 1.24` floor in go.mod — check before using newer features)
+- Go (module `github.com/SWE-2026/biletflow-api`, `go 1.26` floor in go.mod — check before using newer features)
 - Echo v4, pgx v5 (pgxpool), PostgreSQL 17, bcrypt
 - Docker: multi-stage build to distroless; `docker-compose.yml` runs Postgres + API
 

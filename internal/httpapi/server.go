@@ -23,6 +23,7 @@ type Options struct {
 	// NoAuthRateLimit turns off per-IP throttling of /auth endpoints. Tests only.
 	NoAuthRateLimit bool
 	WebURL          string
+	TrustProxy      bool
 }
 
 type Server struct {
@@ -36,6 +37,10 @@ func New(db *store.Postgres, codes *auth.Codes, opts Options) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HTTPErrorHandler = errorHandler(opts.Logger)
+	e.IPExtractor = echo.ExtractIPDirect()
+	if opts.TrustProxy {
+		e.IPExtractor = echo.ExtractIPFromXFFHeader()
+	}
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimit("1M"))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{

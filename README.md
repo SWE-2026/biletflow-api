@@ -54,6 +54,7 @@ Backups and recovery are described in [docs/operations.md](docs/operations.md).
 | `APP_ENV` | `production` | `local` exposes one-time codes as `demoCode`; never on a public server |
 | `CORS_ORIGINS` | none | comma-separated browser origins, e.g. `http://localhost:5173,http://localhost:8081` |
 | `PUBLIC_WEB_URL` | `http://localhost:5173` | web app origin used in email links and Campaign QR codes; use the HTTPS origin in production |
+| `TRUST_PROXY` | `false` | `true` only when the API runs behind a reverse proxy on a private network; client IPs (used by the `/auth` rate limit) are then read from `X-Forwarded-For` hops sent by private-network proxies. Leave `false` when clients reach the API directly, so a spoofed header cannot bypass the rate limit |
 | `SMTP_HOST` | none | transactional email server; when unset, emails are logged (subject only) instead of sent |
 | `SMTP_PORT` | `587` | `587` uses STARTTLS (required), `465` uses implicit TLS |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | none | SMTP credentials; keep them in the environment or a secret store, never in the repo |

@@ -23,6 +23,7 @@ type Config struct {
 	CORSOrigins []string
 	AdminEmails []string
 	WebURL      string
+	TrustProxy  bool
 	SMTP        SMTP
 }
 
@@ -44,6 +45,7 @@ func Load() (Config, error) {
 		CORSOrigins: splitList(os.Getenv("CORS_ORIGINS")),
 		AdminEmails: splitList(strings.ToLower(os.Getenv("ADMIN_EMAILS"))),
 		WebURL:      strings.TrimRight(valueOr(os.Getenv("PUBLIC_WEB_URL"), "http://localhost:5173"), "/"),
+		TrustProxy:  os.Getenv("TRUST_PROXY") == "true",
 		SMTP: SMTP{
 			Host:     os.Getenv("SMTP_HOST"),
 			Username: os.Getenv("SMTP_USERNAME"),
