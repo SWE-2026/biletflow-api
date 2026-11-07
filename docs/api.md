@@ -26,8 +26,8 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 400 | `invalid_json`, `validation_failed`, `invalid_code` |
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified` |
-| 404 | `not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required` |
+| 404 | `not_found`, `user_not_found` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -101,6 +101,15 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/events/:id/orders` 🔒 | — | `{orders}`: OrganizerOrder list, newest first |
 | POST | `/organizer/events/:id/orders/:orderId/refund` 🔒 | `{reason?}` | `{order}`: full **demo** refund of a paid order |
 | POST | `/organizer/events/:id/orders/:orderId/cancel` 🔒 | — | `{order}`: cancels a free registration |
+| GET | `/organizer/events/:id/staff` 🔒 | — | `{staff}`: the event's assigned Event Admins |
+| POST | `/organizer/events/:id/staff` 🔒 | `{email, role}` | `{staffMember}`: assigns or changes a role |
+| DELETE | `/organizer/events/:id/staff/:userId` 🔒 | — | 204 |
+| GET | `/staff/events` 🔒 | — | `{events}`: published events the user may check in |
+| GET | `/staff/events/:id` 🔒 | — | `{event, role, summary}` |
+| GET | `/staff/events/:id/attendees?q=` 🔒 | — | `{tickets}`: StaffTicket search, up to 50 |
+| POST | `/staff/events/:id/check-in` 🔒 | `{qrToken}` | CheckInResult |
+| POST | `/staff/events/:id/tickets/:ticketId/check-in` 🔒 | — | CheckInResult: manual check-in |
+| POST | `/staff/events/:id/tickets/:ticketId/undo` 🔒 | — | `{ticket}`: reverses a check-in |
 
 Codes: valid 10 minutes, resend after 30 s, 5 attempts. Passwords: 8–72 characters.
 
@@ -227,3 +236,47 @@ refunds minus fees. `ticketsSold` counts valid and used tickets, free ones inclu
 
 Refunded and cancelled tickets are invalid and free their inventory. Payments, activations, refunds
 and cancellations are written to an append-only audit log.
+
+## Event Admins and check-in
+
+Used by the mobile ticket-verification app (SRS 4.8). Verification is online only.
+
+**Staff assignment** (organizer, own events only, else 404): `{email, role}` where `role` is
+`scanner | supervisor`. The email must belong to an existing account (404 `user_not_found`); the
+person signs in to BiletFlow once to create it. Assigning an already assigned user changes their
+role. A cancelled event cannot get new staff (409 `invalid_event_state`). Staff changes are written
+to the audit log.
+
+**StaffMember**: `{ userId, email, displayName, role, createdAt }`.
+
+**Access**: a user may use the `/staff/events/:id` routes for events they are assigned to and for
+events owned by their own organizer profile (role `owner`). Any other event is 404. `/staff/events`
+lists only published events. Check-in and undo require a published event (409
+`invalid_event_state`); the event view and attendee search also work for drafts and cancelled events.
+
+**Summary**: `{ registered, checkedIn, remaining }`. `registered` counts valid and used tickets;
+`checkedIn` counts used ones.
+
+**StaffTicket**: `{ id, status, ticketTypeName, attendeeName, attendeeEmail, orderId, checkedInAt }`.
+`attendeeName`/`attendeeEmail` come from the order's attendee details, falling back to the ticket
+owner's account. It never contains the `qrToken`.
+
+**CheckInResult**: `{ result, ticket }`. Every scan returns 200 so the scanner can show the outcome:
+
+| result | meaning |
+|---|---|
+| `valid` | admitted now; the ticket is `used` and `checkedInAt` is set |
+| `already_used` | the ticket was checked in before (`checkedInAt` shows when) |
+| `cancelled` | the registration was cancelled |
+| `refunded` | the order was refunded |
+| `invalid` | no ticket with this QR token or ID belongs to this event; `ticket` is `null` |
+
+A ticket is admitted at most once, even when two devices scan it at the same time.
+
+**Attendee search**: `q` (up to 100 characters) matches the attendee name or email, the owner's
+display name or email (case-insensitive substring), or an exact ticket ID. An empty `q` lists the
+first 50 tickets by name. Results include tickets of every status.
+
+**Undo** (`.../undo`): only the owner or a `supervisor` (403 `forbidden` for a `scanner`). Returns the
+ticket to `valid` and marks the check-in reversed; the reversal is written to the audit log. A ticket
+that is not checked in is 409 `not_checked_in`.

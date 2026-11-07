@@ -71,6 +71,14 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.POST("/me/orders/:id/pay", s.payMyOrder, s.requireAuth)
 	v1.POST("/me/orders/:id/cancel", s.cancelMyOrder, s.requireAuth)
 
+	staff := v1.Group("/staff", s.requireAuth)
+	staff.GET("/events", s.listStaffEvents)
+	staff.GET("/events/:id", s.getStaffEvent)
+	staff.GET("/events/:id/attendees", s.searchAttendees)
+	staff.POST("/events/:id/check-in", s.checkInByToken)
+	staff.POST("/events/:id/tickets/:ticketId/check-in", s.checkInByID)
+	staff.POST("/events/:id/tickets/:ticketId/undo", s.undoCheckIn)
+
 	organizer := v1.Group("/organizer", s.requireAuth)
 	organizer.POST("/profile", s.createOrganizer)
 	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
@@ -93,6 +101,9 @@ func (s *Server) routes(v1 *echo.Group) {
 	events.GET("/:id/orders", s.listEventOrders)
 	events.POST("/:id/orders/:orderId/refund", s.refundOrder)
 	events.POST("/:id/orders/:orderId/cancel", s.cancelRegistration)
+	events.GET("/:id/staff", s.listStaff)
+	events.POST("/:id/staff", s.assignStaff)
+	events.DELETE("/:id/staff/:userId", s.removeStaff)
 }
 
 // authRateLimit slows down code and password guessing: about one request per second per IP, with bursts of 10.
