@@ -54,7 +54,11 @@ func readPaidSales(ctx context.Context, q rowQuerier, organizerID, eventID strin
 	if err != nil {
 		return ps, notFound(err)
 	}
-	ps.Status, ps.FeeAmount = "inactive", PaidSalesActivationFee
+	settings, err := readSettings(ctx, q)
+	if err != nil {
+		return ps, err
+	}
+	ps.Status, ps.FeeAmount = "inactive", settings.ActivationFeeAmount
 	if status != nil && (*status == "active" || *status == "suspended") {
 		ps.Status, ps.FeeAmount = *status, *fee
 	}
@@ -79,6 +83,7 @@ func (p *Postgres) ActivatePaidSales(ctx context.Context, organizerID, actorID, 
 			return ErrActivationIncomplete
 		}
 		var id string
+		fee := ps.FeeAmount
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO paid_sales_activations (event_id, status, activated_at, fee_amount,
 			 fee_payment_reference, terms_accepted_at, activated_by)
@@ -86,12 +91,12 @@ func (p *Postgres) ActivatePaidSales(ctx context.Context, organizerID, actorID, 
 			 ON CONFLICT (event_id) DO UPDATE SET status='active', activated_at=now(),
 			 fee_amount=EXCLUDED.fee_amount, fee_payment_reference=EXCLUDED.fee_payment_reference,
 			 terms_accepted_at=now(), activated_by=EXCLUDED.activated_by
-			 RETURNING id`, eventID, PaidSalesActivationFee, "demo_"+rand.Text(), actorID).Scan(&id); err != nil {
+			 RETURNING id`, eventID, fee, "demo_"+rand.Text(), actorID).Scan(&id); err != nil {
 			return err
 		}
 		return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "paid_sales.activated",
 			entityType: "paid_sales_activation", entityID: id,
-			details: map[string]any{"feeAmount": PaidSalesActivationFee, "demo": true}})
+			details: map[string]any{"feeAmount": fee, "demo": true}})
 	})
 	if err != nil {
 		return PaidSales{}, err

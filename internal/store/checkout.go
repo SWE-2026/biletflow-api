@@ -111,18 +111,22 @@ func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in Chec
 	for i, item := range items {
 		ids[i], quantities[i], prices[i] = item.TicketTypeID, int32(item.Quantity), item.price
 	}
+	settings, err := readSettings(ctx, tx)
+	if err != nil {
+		return "", err
+	}
 	status := "pending"
 	if total == 0 {
 		status = "paid"
 	}
 	var orderID string
-	err := tx.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO orders (status, total_amount, processing_fee_amount, event_id, buyer_id,
 		 attendee_name, attendee_email, expires_at, paid_at, subtotal_amount, discount_amount, campaign_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7,
 		 CASE WHEN $1::text = 'pending' THEN now() + make_interval(secs => $8::float8) END,
 		 CASE WHEN $1::text = 'paid' THEN now() END, $9, $10, NULLIF($11, '')::uuid) RETURNING id`,
-		status, total, ProcessingFee(total), eventID, userID, in.AttendeeName, in.AttendeeEmail,
+		status, total, ProcessingFee(total, settings.ProcessingFeePercent), eventID, userID, in.AttendeeName, in.AttendeeEmail,
 		HoldDuration.Seconds(), t.subtotal, t.discount, t.campaignID).Scan(&orderID)
 	if err != nil {
 		return "", err

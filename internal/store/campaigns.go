@@ -48,7 +48,7 @@ type CampaignInput struct {
 	TicketTypeIDs  []string   `json:"ticketTypeIds"`
 }
 
-const campaignSelect = `SELECT c.id, c.event_id, c.name, c.code, c.token, c.discount_type, c.discount_value,
+const campaignFrom = `SELECT c.id, c.event_id, c.name, c.code, c.token, c.discount_type, c.discount_value,
  c.starts_at, c.ends_at, c.max_redemptions, c.status, c.created_at, c.updated_at,
  ARRAY(SELECT ticket_type_id::text FROM campaign_ticket_types WHERE campaign_id = c.id ORDER BY 1),
  (SELECT COUNT(*) FROM orders o WHERE o.campaign_id = c.id AND o.status = 'paid'),
@@ -56,7 +56,9 @@ const campaignSelect = `SELECT c.id, c.event_id, c.name, c.code, c.token, c.disc
   JOIN orders o ON o.id = oi.order_id WHERE o.campaign_id = c.id AND t.status IN ('valid','used')),
  (SELECT COALESCE(SUM(subtotal_amount), 0)::bigint FROM orders WHERE campaign_id = c.id AND status = 'paid'),
  (SELECT COALESCE(SUM(discount_amount), 0)::bigint FROM orders WHERE campaign_id = c.id AND status = 'paid')
- FROM campaigns c JOIN events e ON e.id = c.event_id
+ FROM campaigns c JOIN events e ON e.id = c.event_id`
+
+const campaignSelect = campaignFrom + `
  WHERE c.event_id = $1 AND e.organizer_id = $2`
 
 func scanCampaign(row pgx.Row) (Campaign, error) {

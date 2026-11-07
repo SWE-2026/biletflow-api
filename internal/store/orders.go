@@ -17,13 +17,12 @@ var (
 )
 
 const (
-	HoldDuration         = 15 * time.Minute
-	ProcessingFeePercent = 3
-	DemoProvider         = "demo"
+	HoldDuration = 15 * time.Minute
+	DemoProvider = "demo"
 )
 
-func ProcessingFee(total int64) int64 {
-	return (total*ProcessingFeePercent + 50) / 100
+func ProcessingFee(total int64, percent int) int64 {
+	return (total*int64(percent) + 50) / 100
 }
 
 type OrderItem struct {
@@ -85,7 +84,11 @@ func scanOrder(row pgx.CollectableRow) (OrganizerOrder, error) {
 }
 
 func loadOrders(ctx context.Context, q querier, where string, args ...any) ([]OrganizerOrder, error) {
-	rows, err := q.Query(ctx, orderSelect+where+orderSort, args...)
+	return loadOrdersLimit(ctx, q, where, "", args...)
+}
+
+func loadOrdersLimit(ctx context.Context, q querier, where, limit string, args ...any) ([]OrganizerOrder, error) {
+	rows, err := q.Query(ctx, orderSelect+where+orderSort+limit, args...)
 	if err != nil {
 		return nil, err
 	}

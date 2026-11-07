@@ -33,6 +33,7 @@ email provider is configured yet.
 | `PORT` | `8080` | HTTP port |
 | `APP_ENV` | `production` | `local` exposes one-time codes as `demoCode`; never on a public server |
 | `CORS_ORIGINS` | none | comma-separated browser origins, e.g. `http://localhost:5173,http://localhost:8081` |
+| `ADMIN_EMAILS` | none | comma-separated emails promoted to platform admin on start; each account must exist and be a plain customer account |
 
 ## Checks
 

@@ -67,6 +67,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
 	v1.GET("/events/:id/promo", s.getPromo)
 	v1.POST("/events/:id/checkout", s.checkout, s.requireAuth)
+	v1.POST("/events/:id/report", s.reportEvent, s.requireAuth)
 	v1.GET("/me/orders", s.listMyOrders, s.requireAuth)
 	v1.GET("/me/orders/:id", s.getMyOrder, s.requireAuth)
 	v1.POST("/me/orders/:id/pay", s.payMyOrder, s.requireAuth)
@@ -81,6 +82,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	staff.POST("/events/:id/tickets/:ticketId/undo", s.undoCheckIn)
 
 	s.supportRoutes(v1.Group("/support", s.requireAuth))
+	s.adminRoutes(v1.Group("/admin", s.requireAuth, s.requireAdmin))
 
 	organizer := v1.Group("/organizer", s.requireAuth)
 	organizer.POST("/profile", s.createOrganizer)

@@ -20,6 +20,7 @@ type Config struct {
 	// demo works without an email provider.
 	Env         string
 	CORSOrigins []string
+	AdminEmails []string
 }
 
 func (c Config) IsLocal() bool { return c.Env == EnvLocal }
@@ -30,6 +31,7 @@ func Load() (Config, error) {
 		Port:        valueOr(os.Getenv("PORT"), "8080"),
 		Env:         valueOr(os.Getenv("APP_ENV"), EnvProduction),
 		CORSOrigins: splitList(os.Getenv("CORS_ORIGINS")),
+		AdminEmails: splitList(strings.ToLower(os.Getenv("ADMIN_EMAILS"))),
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")

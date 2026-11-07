@@ -42,6 +42,11 @@ func run(logger *slog.Logger) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
+	promoted, err := db.PromoteAdmins(ctx, cfg.AdminEmails)
+	if err != nil {
+		return err
+	}
+	logger.Info("admin accounts checked", "configured", len(cfg.AdminEmails), "promoted", promoted)
 
 	codes := auth.NewCodes(db, mail.LogMailer{Logger: logger})
 	server := httpapi.New(db, codes, httpapi.Options{

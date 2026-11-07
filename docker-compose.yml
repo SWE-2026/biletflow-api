@@ -26,6 +26,7 @@ services:
       DATABASE_URL: postgres://biletflow:biletflow@postgres:5432/biletflow?sslmode=disable
       APP_ENV: local
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     ports:
       - "8080:8080"
 

@@ -16,13 +16,14 @@ type User struct {
 	PasswordHash    *string
 	EmailVerifiedAt *time.Time
 	CreatedAt       time.Time
+	SuspendedAt     *time.Time
 }
 
-const userColumns = `id, email, display_name, role, organizer_id, password_hash, email_verified_at, created_at`
+const userColumns = `id, email, display_name, role, organizer_id, password_hash, email_verified_at, created_at, suspended_at`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.OrganizerID, &u.PasswordHash, &u.EmailVerifiedAt, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.OrganizerID, &u.PasswordHash, &u.EmailVerifiedAt, &u.CreatedAt, &u.SuspendedAt)
 	return u, notFound(err)
 }
 

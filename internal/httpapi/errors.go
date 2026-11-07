@@ -56,6 +56,8 @@ var knownErrors = []struct {
 	{store.ErrOrderExpired, newError(http.StatusConflict, "order_expired", "Your ticket hold has expired. Start checkout again.")},
 	{store.ErrFreeOrder, newError(http.StatusConflict, "free_order", "Free registrations are cancelled, not refunded.")},
 	{store.ErrForbidden, errForbidden},
+	{store.ErrStateConflict, newError(http.StatusConflict, "invalid_state", "This action is not allowed in the current state.")},
+	{store.ErrAlreadyReported, newError(http.StatusConflict, "already_reported", "You have already reported this event. The platform team will review it.")},
 	{store.ErrInvalidAssignee, &Error{Status: http.StatusBadRequest, Code: "validation_failed", Message: "Some fields are invalid.",
 		Fields: map[string]string{"assigneeId": "This person cannot handle this case."}}},
 	{store.ErrCampaignTicketTypes, &Error{Status: http.StatusBadRequest, Code: "validation_failed", Message: "Some fields are invalid.",

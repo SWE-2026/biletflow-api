@@ -15,6 +15,7 @@ import (
 var (
 	errInvalidCredentials = newError(http.StatusUnauthorized, "invalid_credentials", "Email or password is incorrect.")
 	errEmailTaken         = newError(http.StatusConflict, "email_taken", "An account with this email already exists. Sign in instead.")
+	errAccountSuspended   = newError(http.StatusForbidden, "account_suspended", "This account is suspended. Contact BiletFlow support.")
 )
 
 type userResponse struct {
@@ -56,6 +57,9 @@ func (s *Server) challengeJSON(ch auth.Challenge) challengeResponse {
 }
 
 func (s *Server) startSession(ctx context.Context, u store.User) (sessionResponse, error) {
+	if u.SuspendedAt != nil {
+		return sessionResponse{}, errAccountSuspended
+	}
 	token, hash := auth.NewSessionToken()
 	if err := s.db.CreateSession(ctx, u.ID, hash, time.Now().Add(s.opts.SessionTTL)); err != nil {
 		return sessionResponse{}, err

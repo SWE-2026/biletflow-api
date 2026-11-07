@@ -27,7 +27,7 @@ func TestProcessingFee(t *testing.T) {
 		{give: 10000, want: 300},
 	}
 	for _, tt := range tests {
-		if got := store.ProcessingFee(tt.give); got != tt.want {
+		if got := store.ProcessingFee(tt.give, 3); got != tt.want {
 			t.Fatalf("ProcessingFee(%d) = %d, want %d", tt.give, got, tt.want)
 		}
 	}

@@ -173,7 +173,7 @@ func (p *Postgres) TransitionEvent(ctx context.Context, organizerID, actorID, id
 }
 
 func (p *Postgres) CancelEvent(ctx context.Context, organizerID, actorID, id string) (Event, error) {
-	return p.changeEventStatus(ctx, organizerID, actorID, id, []string{"draft", "published"}, "cancelled", "event.cancelled")
+	return p.changeEventStatus(ctx, organizerID, actorID, id, []string{"draft", "published", "suspended"}, "cancelled", "event.cancelled")
 }
 
 func (p *Postgres) changeEventStatus(ctx context.Context, organizerID, actorID, id string, from []string, to, action string) (Event, error) {

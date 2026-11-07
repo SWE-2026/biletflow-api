@@ -25,9 +25,9 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 |---|---|
 | 400 | `invalid_json`, `validation_failed`, `invalid_code` |
 | 401 | `unauthorized`, `invalid_credentials` |
-| 403 | `forbidden`, `email_unverified` |
+| 403 | `forbidden`, `email_unverified`, `account_suspended` |
 | 404 | `not_found`, `user_not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -52,7 +52,7 @@ timezone, visibility, capacity, status, phase, startsAt, endsAt, registrationOpe
 registrationClosesAt, refundPolicy, createdAt, updatedAt }`. `phase` is computed on each read:
 `cancelled` for a cancelled event, otherwise `upcoming` before `startsAt`, `active` until `endsAt`
 and `completed` after. `visibility` is `public | unlisted | private` and
-`status` is `draft | published | cancelled`. Times are RFC 3339 values; the event's IANA `timezone`
+`status` is `draft | published | cancelled | suspended` (`suspended` is set by platform admins only). Times are RFC 3339 values; the event's IANA `timezone`
 preserves its local scheduling context. A new event is always a draft.
 
 **TicketType**: `{ id, eventId, name, description, priceAmount, quantity, salesStartsAt,
@@ -79,6 +79,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
 | POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
 | GET | `/events/:id/promo?code=` or `?campaign=` | — | `{promo}`: validates a promo code or campaign link token |
+| POST | `/events/:id/report` 🔒 | `{reason, details?}` | 204: reports the event to platform admins |
 | POST | `/events/:id/checkout` 🔒 | Checkout input | 201 `{order}`: holds the tickets (paid) or issues them (free) |
 | GET | `/me/orders` 🔒 | — | `{orders}`: the current user's orders, newest first |
 | GET | `/me/orders/:id` 🔒 | — | `{order, tickets}` |
@@ -197,7 +198,7 @@ transactions.
 
 **PaidSales**: `{ status, feeAmount, demo, activatedAt, checklist: { paidTicketType, payoutAccount,
 contactPhone } }`. `status` is `inactive | active | suspended`. `feeAmount` is the one-time activation
-fee in KZT (currently 10000). The checklist needs at least one ticket type with a price above 0, a
+fee in KZT, taken from the platform settings (default 10000) until activation and fixed after it. The checklist needs at least one ticket type with a price above 0, a
 `payoutAccountReference` on the organizer profile and a `contactPhone` (the demo stand-in for identity
 and payout verification).
 
@@ -239,7 +240,7 @@ response is 409 `invalid_event_state`, and if paid sales were suspended it is 40
 
 **OrganizerOrder**: Order plus `{ buyerEmail, processingFeeAmount }`.
 
-**Processing fee**: 3% of the order total, rounded to whole KZT, deducted from the organizer's payout
+**Processing fee**: the platform's `processingFeePercent` (default 3%) of the order total, fixed when the order is created, rounded to whole KZT, deducted from the organizer's payout
 (the buyer pays `totalAmount`).
 
 **Sales** (`GET .../sales`): `{ grossAmount, processingFeeAmount, refundedAmount,
@@ -456,3 +457,71 @@ Entries are append-only; no route edits or deletes them.
 event's details, capacity, refund policy and dates, and copies of its ticket types (sales windows
 cleared). Registration windows are cleared too. Orders, tickets, payments, check-ins, campaigns,
 staff and support cases are not copied. Works for events in any state.
+
+## Platform administration
+
+SRS 4.12 and 4.5. Every `/admin` route needs a session with role `admin` (else 403 `forbidden`).
+
+**Admin accounts**: list emails in `ADMIN_EMAILS`. On start the API promotes each listed account that
+exists and has role `customer`; create the account first (sign in once), then restart the API.
+Organizer accounts are not promoted.
+
+**Suspension**
+
+- `POST /admin/users/:userId/suspend` and `/restore` → `{user}` (AdminUser). A suspended account is
+  signed out everywhere, every token is rejected (401) and signing in returns 403
+  `account_suspended`. Admin accounts cannot be suspended (403 `forbidden`); suspending a suspended
+  user, or restoring an active one, is 409 `invalid_state`.
+- `POST /admin/events/:id/suspend` and `/restore` → `{event}`. Only a `published` event can be
+  suspended; restoring returns it to `published` (409 `invalid_event_state` otherwise). A suspended
+  event disappears from public routes, cannot be sold, paid for or checked in, and stays readable and
+  editable by its organizer, who can still cancel it.
+- `POST /admin/events/:id/paid-sales/suspend` and `/restore` → 204. Suspends or restores the event's
+  paid sales; buyers then get `paid_sales_inactive` and the organizer `paid_sales_suspended`
+  (409 `invalid_state` when the activation is not in the required state).
+
+**Search and monitoring** (each up to 200 rows, newest first):
+
+| Method | Path | Filters | Response |
+|---|---|---|---|
+| GET | `/admin/users` | `q` (email, name or ID) | `{users}`: AdminUser |
+| GET | `/admin/events` | `q` (title, venue or ID), `status` | `{events}` |
+| GET | `/admin/events/:id/activity` | `from`, `to`, `type` | `{activity}`: the event timeline |
+| GET | `/admin/orders` | `q` (order ID, buyer or attendee email, event title), `status` | `{orders}`: OrganizerOrder |
+| GET | `/admin/payments` | `q`, `status` (`failed` lists payment failures) | `{payments}`: AdminPayment |
+| GET | `/admin/refunds` | — | `{refunds}`: AdminRefund |
+| GET | `/admin/paid-sales` | `status` (`active`, `suspended`) | `{paidSales}`: AdminActivation |
+| GET | `/admin/campaigns` | — | `{campaigns}`: every campaign with stats |
+| GET | `/admin/reports` | `status` (`open`, `dismissed`, `actioned`) | `{reports}`: EventReport |
+| POST | `/admin/reports/:reportId/resolve` | `{status}`: `dismissed` or `actioned` | `{report}` |
+| GET | `/admin/settings` | — | `{settings}` |
+| PUT | `/admin/settings` | `{activationFeeAmount, processingFeePercent}` | `{settings}` |
+| GET | `/admin/export/:kind` | `kind`: `orders`, `payments`, `refunds` | CSV download, up to 10000 rows |
+
+Escalated support cases are handled through `/support/cases`, where admins see every case.
+
+**AdminUser**: `{ id, email, displayName, role, organizerId, emailVerified, suspendedAt, createdAt }`.
+
+**AdminPayment**: `{ id, orderId, eventId, eventTitle, buyerEmail, amount, status, demo, createdAt }`.
+
+**AdminRefund**: `{ id, orderId, eventId, eventTitle, amount, status, reason, createdBy, demo,
+createdAt }` (`createdBy` is the refunding user's email).
+
+**AdminActivation**: `{ eventId, eventTitle, organizerName, status, feeAmount, demo, activatedAt,
+suspendedAt }`.
+
+**Settings**: `{ activationFeeAmount, processingFeePercent, updatedAt }`. The fee is 0–10,000,000 KZT
+and the percentage 0–20. New values apply to activations and orders created afterwards.
+
+**Event reports**: `POST /events/:id/report` takes `reason` (`fraud | inappropriate | misleading |
+other`) and optional `details` (up to 2000 characters) for a published public or unlisted event
+(404 otherwise). One open report per user and event (409 `already_reported`). **EventReport**:
+`{ id, eventId, eventTitle, eventStatus, reporterEmail, reason, details, status, createdAt,
+reviewedAt }`. Resolving an already resolved report is 409 `invalid_state`.
+
+Admin suspensions, restorations and report decisions are written to the audit log; event-related ones
+appear in that event's timeline (types `event`, `paid_sales`, `report`).
+
+**CSV export**: comma-separated with a header row; money is whole KZT and times are RFC 3339 UTC.
+Cells that start with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'` so spreadsheet
+apps do not run them as formulas.
