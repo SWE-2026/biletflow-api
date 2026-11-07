@@ -42,18 +42,21 @@ type Payment struct {
 }
 
 type Order struct {
-	ID            string      `json:"id"`
-	EventID       string      `json:"eventId"`
-	EventTitle    string      `json:"eventTitle"`
-	Status        string      `json:"status"`
-	TotalAmount   int64       `json:"totalAmount"`
-	AttendeeName  string      `json:"attendeeName"`
-	AttendeeEmail string      `json:"attendeeEmail"`
-	ExpiresAt     *time.Time  `json:"expiresAt"`
-	PaidAt        *time.Time  `json:"paidAt"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	Items         []OrderItem `json:"items"`
-	Payments      []Payment   `json:"payments"`
+	ID             string      `json:"id"`
+	EventID        string      `json:"eventId"`
+	EventTitle     string      `json:"eventTitle"`
+	Status         string      `json:"status"`
+	SubtotalAmount int64       `json:"subtotalAmount"`
+	DiscountAmount int64       `json:"discountAmount"`
+	PromoCode      *string     `json:"promoCode"`
+	TotalAmount    int64       `json:"totalAmount"`
+	AttendeeName   string      `json:"attendeeName"`
+	AttendeeEmail  string      `json:"attendeeEmail"`
+	ExpiresAt      *time.Time  `json:"expiresAt"`
+	PaidAt         *time.Time  `json:"paidAt"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	Items          []OrderItem `json:"items"`
+	Payments       []Payment   `json:"payments"`
 }
 
 type OrganizerOrder struct {
@@ -65,8 +68,9 @@ type OrganizerOrder struct {
 const orderSelect = `SELECT o.id, o.event_id, e.title,
  CASE WHEN o.status = 'pending' AND o.expires_at <= now() THEN 'expired' ELSE o.status END,
  o.total_amount, o.attendee_name, o.attendee_email, o.expires_at, o.paid_at, o.created_at,
- u.email, o.processing_fee_amount
+ u.email, o.processing_fee_amount, o.subtotal_amount, o.discount_amount, c.code
  FROM orders o JOIN events e ON e.id = o.event_id JOIN users u ON u.id = o.buyer_id
+ LEFT JOIN campaigns c ON c.id = o.campaign_id
  WHERE `
 
 const orderSort = ` ORDER BY o.created_at DESC, o.id`
@@ -74,7 +78,8 @@ const orderSort = ` ORDER BY o.created_at DESC, o.id`
 func scanOrder(row pgx.CollectableRow) (OrganizerOrder, error) {
 	var o OrganizerOrder
 	err := row.Scan(&o.ID, &o.EventID, &o.EventTitle, &o.Status, &o.TotalAmount, &o.AttendeeName,
-		&o.AttendeeEmail, &o.ExpiresAt, &o.PaidAt, &o.CreatedAt, &o.BuyerEmail, &o.ProcessingFeeAmount)
+		&o.AttendeeEmail, &o.ExpiresAt, &o.PaidAt, &o.CreatedAt, &o.BuyerEmail, &o.ProcessingFeeAmount,
+		&o.SubtotalAmount, &o.DiscountAmount, &o.PromoCode)
 	o.Items, o.Payments = []OrderItem{}, []Payment{}
 	return o, err
 }

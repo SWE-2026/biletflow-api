@@ -125,7 +125,7 @@ func (s *Server) checkInByToken(c echo.Context) error {
 	}
 	in.QRToken = strings.TrimSpace(in.QRToken)
 	fe := fieldErrors{}
-	fe.check(len(in.QRToken) > 0 && len(in.QRToken) <= 128, "qrToken", "Scan a ticket QR code.")
+	fe.check(len(in.QRToken) > 0 && len(in.QRToken) <= 512, "qrToken", "Scan a ticket QR code.")
 	if err := fe.err(); err != nil {
 		return err
 	}

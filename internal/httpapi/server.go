@@ -65,6 +65,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.GET("/events", s.listEvents)
 	v1.GET("/events/:id", s.getPublicEvent)
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
+	v1.GET("/events/:id/promo", s.getPromo)
 	v1.POST("/events/:id/checkout", s.checkout, s.requireAuth)
 	v1.GET("/me/orders", s.listMyOrders, s.requireAuth)
 	v1.GET("/me/orders/:id", s.getMyOrder, s.requireAuth)
@@ -83,7 +84,10 @@ func (s *Server) routes(v1 *echo.Group) {
 	organizer.POST("/profile", s.createOrganizer)
 	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
 	organizer.PUT("/profile", s.updateOrganizer, s.requireOrganizer)
-	events := organizer.Group("/events", s.requireOrganizer)
+	s.organizerEventRoutes(organizer.Group("/events", s.requireOrganizer))
+}
+
+func (s *Server) organizerEventRoutes(events *echo.Group) {
 	events.POST("", s.createEvent)
 	events.GET("", s.listOrganizerEvents)
 	events.GET("/:id", s.getOrganizerEvent)
@@ -101,6 +105,11 @@ func (s *Server) routes(v1 *echo.Group) {
 	events.GET("/:id/orders", s.listEventOrders)
 	events.POST("/:id/orders/:orderId/refund", s.refundOrder)
 	events.POST("/:id/orders/:orderId/cancel", s.cancelRegistration)
+	events.GET("/:id/campaigns", s.listCampaigns)
+	events.POST("/:id/campaigns", s.createCampaign)
+	events.PUT("/:id/campaigns/:campaignId", s.updateCampaign)
+	events.POST("/:id/campaigns/:campaignId/enable", s.enableCampaign)
+	events.POST("/:id/campaigns/:campaignId/disable", s.disableCampaign)
 	events.GET("/:id/staff", s.listStaff)
 	events.POST("/:id/staff", s.assignStaff)
 	events.DELETE("/:id/staff/:userId", s.removeStaff)

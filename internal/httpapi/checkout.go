@@ -17,6 +17,7 @@ func decodeCheckout(c echo.Context, accountEmail string) (store.CheckoutInput, e
 	}
 	in.AttendeeName = strings.TrimSpace(in.AttendeeName)
 	in.AttendeeEmail = normalizeEmail(in.AttendeeEmail)
+	in.PromoCode = normalizePromoCode(in.PromoCode)
 	if in.AttendeeEmail == "" {
 		in.AttendeeEmail = accountEmail
 	}
@@ -38,6 +39,7 @@ func validateCheckout(in store.CheckoutInput) error {
 	}
 	fe.check(len(in.AttendeeName) > 0 && len(in.AttendeeName) <= 200, "attendeeName", "Enter the attendee name (up to 200 characters).")
 	fe.check(validEmail(in.AttendeeEmail), "attendeeEmail", "Enter a valid attendee email address.")
+	fe.check(len(in.PromoCode) <= 32, "promoCode", "Use up to 32 characters.")
 	return fe.err()
 }
 

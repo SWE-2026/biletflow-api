@@ -18,6 +18,7 @@ type CheckoutInput struct {
 	Items         []CheckoutItem `json:"items"`
 	AttendeeName  string         `json:"attendeeName"`
 	AttendeeEmail string         `json:"attendeeEmail"`
+	PromoCode     string         `json:"promoCode"`
 }
 
 type pricedItem struct {
@@ -37,7 +38,13 @@ func (p *Postgres) Checkout(ctx context.Context, userID, eventID string, in Chec
 		if err != nil {
 			return err
 		}
-		orderID, err = insertOrder(ctx, tx, userID, eventID, in, items)
+		totals := orderTotals{subtotal: subtotal(items)}
+		if in.PromoCode != "" {
+			if totals.campaignID, totals.discount, err = applyPromo(ctx, tx, eventID, in.PromoCode, items); err != nil {
+				return err
+			}
+		}
+		orderID, err = insertOrder(ctx, tx, userID, eventID, in, items, totals)
 		return err
 	})
 	if err != nil {
@@ -82,13 +89,26 @@ func paidSalesActive(ctx context.Context, tx pgx.Tx, eventID string) (bool, erro
 	return active, err
 }
 
-func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in CheckoutInput, items []pricedItem) (string, error) {
-	var total int64
+type orderTotals struct {
+	subtotal   int64
+	discount   int64
+	campaignID string
+}
+
+func subtotal(items []pricedItem) int64 {
+	var sum int64
+	for _, item := range items {
+		sum += item.price * int64(item.Quantity)
+	}
+	return sum
+}
+
+func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in CheckoutInput, items []pricedItem, t orderTotals) (string, error) {
+	total := t.subtotal - t.discount
 	ids := make([]string, len(items))
 	quantities := make([]int32, len(items))
 	prices := make([]int64, len(items))
 	for i, item := range items {
-		total += item.price * int64(item.Quantity)
 		ids[i], quantities[i], prices[i] = item.TicketTypeID, int32(item.Quantity), item.price
 	}
 	status := "pending"
@@ -98,12 +118,12 @@ func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in Chec
 	var orderID string
 	err := tx.QueryRow(ctx,
 		`INSERT INTO orders (status, total_amount, processing_fee_amount, event_id, buyer_id,
-		 attendee_name, attendee_email, expires_at, paid_at)
+		 attendee_name, attendee_email, expires_at, paid_at, subtotal_amount, discount_amount, campaign_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7,
 		 CASE WHEN $1::text = 'pending' THEN now() + make_interval(secs => $8::float8) END,
-		 CASE WHEN $1::text = 'paid' THEN now() END) RETURNING id`,
+		 CASE WHEN $1::text = 'paid' THEN now() END, $9, $10, NULLIF($11, '')::uuid) RETURNING id`,
 		status, total, ProcessingFee(total), eventID, userID, in.AttendeeName, in.AttendeeEmail,
-		HoldDuration.Seconds()).Scan(&orderID)
+		HoldDuration.Seconds(), t.subtotal, t.discount, t.campaignID).Scan(&orderID)
 	if err != nil {
 		return "", err
 	}

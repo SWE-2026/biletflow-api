@@ -159,12 +159,24 @@ func (p *Postgres) checkIn(ctx context.Context, userID, eventID, match, value st
 		ticket, err := scanStaffTicket(tx.QueryRow(ctx, staffTicketSelect+match, eventID, value))
 		if errors.Is(err, pgx.ErrNoRows) {
 			res.Result = "invalid"
+			if match == byToken && isCampaignToken(ctx, tx, value) {
+				res.Result = "campaign_qr"
+			}
 			return nil
 		}
 		res.Result, res.Ticket = checkInResult(ticketID != "", ticket.Status), &ticket
 		return err
 	})
 	return res, err
+}
+
+func isCampaignToken(ctx context.Context, tx pgx.Tx, value string) bool {
+	if strings.Contains(value, "campaign=") {
+		return true
+	}
+	var found bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM campaigns WHERE token = $1)`, value).Scan(&found)
+	return err == nil && found
 }
 
 func checkInResult(admitted bool, status string) string {

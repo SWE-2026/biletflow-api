@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified` |
 | 404 | `not_found`, `user_not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -76,6 +76,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/events` | — | `{events}`: published **public** events |
 | GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
 | POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
+| GET | `/events/:id/promo?code=` or `?campaign=` | — | `{promo}`: validates a promo code or campaign link token |
 | POST | `/events/:id/checkout` 🔒 | Checkout input | 201 `{order}`: holds the tickets (paid) or issues them (free) |
 | GET | `/me/orders` 🔒 | — | `{orders}`: the current user's orders, newest first |
 | GET | `/me/orders/:id` 🔒 | — | `{order, tickets}` |
@@ -101,6 +102,11 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/events/:id/orders` 🔒 | — | `{orders}`: OrganizerOrder list, newest first |
 | POST | `/organizer/events/:id/orders/:orderId/refund` 🔒 | `{reason?}` | `{order}`: full **demo** refund of a paid order |
 | POST | `/organizer/events/:id/orders/:orderId/cancel` 🔒 | — | `{order}`: cancels a free registration |
+| GET | `/organizer/events/:id/campaigns` 🔒 | — | `{campaigns}`, newest first |
+| POST | `/organizer/events/:id/campaigns` 🔒 | Campaign input | 201 `{campaign}`: generates the code and link token |
+| PUT | `/organizer/events/:id/campaigns/:campaignId` 🔒 | Campaign input | `{campaign}`; full replacement |
+| POST | `/organizer/events/:id/campaigns/:campaignId/enable` 🔒 | — | `{campaign}` |
+| POST | `/organizer/events/:id/campaigns/:campaignId/disable` 🔒 | — | `{campaign}` |
 | GET | `/organizer/events/:id/staff` 🔒 | — | `{staff}`: the event's assigned Event Admins |
 | POST | `/organizer/events/:id/staff` 🔒 | `{email, role}` | `{staffMember}`: assigns or changes a role |
 | DELETE | `/organizer/events/:id/staff/:userId` 🔒 | — | 204 |
@@ -187,7 +193,7 @@ and payout verification).
 409 `paid_sales_suspended`; a cancelled event is 409 `invalid_event_state`. Activating an already active
 event returns it unchanged. Activation applies to that event only and is recorded in the audit log.
 
-**Checkout input**: `{items: [{ticketTypeId, quantity}], attendeeName, attendeeEmail?}`. 1–10 items,
+**Checkout input**: `{items: [{ticketTypeId, quantity}], attendeeName, attendeeEmail?, promoCode?}`. 1–10 items,
 each ticket type once, quantity 1–100. `attendeeName` is 1–200 characters; `attendeeEmail` defaults to
 the account email. The account must have a verified email (403 `email_unverified`). Each item goes
 through the same 404 rules and the `registration_closed`, `ticket_limit_reached` and `sold_out` checks
@@ -199,12 +205,14 @@ for the same event. Prices and totals are always computed on the server.
   exist until a successful payment.
 - Total 0: the order is `paid` at once and its tickets are issued, without a payment.
 
-Concurrent checkouts never oversell a ticket type.
+Concurrent checkouts never oversell a ticket type. With `promoCode`, the promo checks below run after
+the item checks; a failing code rejects the whole checkout.
 
-**Order**: `{ id, eventId, eventTitle, status, totalAmount, attendeeName, attendeeEmail, expiresAt,
+**Order**: `{ id, eventId, eventTitle, status, subtotalAmount, discountAmount, promoCode, totalAmount, attendeeName, attendeeEmail, expiresAt,
 paidAt, createdAt, items: [{ticketTypeId, ticketTypeName, quantity, unitPriceAmount}], payments:
 [Payment] }`. `status` is `pending | paid | cancelled | refunded | expired`. `expired` means a pending
-order whose hold has ended; its tickets are released.
+order whose hold has ended; its tickets are released. `totalAmount` is `subtotalAmount` minus
+`discountAmount`; `promoCode` is `null` without a promo.
 
 **Payment**: `{ id, amount, status, demo, createdAt }`. `status` is `failed | succeeded | refunded`.
 
@@ -270,8 +278,12 @@ owner's account. It never contains the `qrToken`.
 | `cancelled` | the registration was cancelled |
 | `refunded` | the order was refunded |
 | `invalid` | no ticket with this QR token or ID belongs to this event; `ticket` is `null` |
+| `campaign_qr` | a Campaign QR link or token was scanned; it never admits anyone; `ticket` is `null` |
 
 A ticket is admitted at most once, even when two devices scan it at the same time.
+
+`qrToken` is up to 512 characters, so a scanned campaign link is recognised rather than rejected as
+too long.
 
 **Attendee search**: `q` (up to 100 characters) matches the attendee name or email, the owner's
 display name or email (case-insensitive substring), or an exact ticket ID. An empty `q` lists the
@@ -280,3 +292,49 @@ first 50 tickets by name. Results include tickets of every status.
 **Undo** (`.../undo`): only the owner or a `supervisor` (403 `forbidden` for a `scanner`). Returns the
 ticket to `valid` and marks the check-in reversed; the reversal is written to the audit log. A ticket
 that is not checked in is 409 `not_checked_in`.
+
+## Promo codes and Campaign QR codes
+
+SRS 4.14. Every discount is computed and enforced on the server; links never carry an amount.
+
+**Campaign**: `{ id, eventId, name, code, token, linkPath, discountType, discountValue, startsAt,
+endsAt, maxRedemptions, status, ticketTypeIds, createdAt, updatedAt, stats: { redemptions,
+ticketsSold, grossAmount, discountAmount, netAmount } }`. `discountType` is `percent | fixed`;
+`discountValue` is 1–100 for `percent` and whole KZT for `fixed`. `status` is `active | disabled`.
+An empty `ticketTypeIds` means the campaign applies to every ticket type of the event.
+
+- `code` is a generated 10-character promo code (uppercase letters and digits) that buyers type.
+- `token` is an opaque link token (`cmp_…`). `linkPath` is `/events/:id?campaign=<token>`; the web app
+  prefixes its own HTTPS origin and renders the Campaign QR from that URL. Draw it so it looks
+  clearly different from an admission ticket QR.
+- `stats` covers paid orders only: `redemptions` (orders), `ticketsSold` (valid and used tickets),
+  `grossAmount` (before discount), `discountAmount` and `netAmount` (gross minus discount).
+
+**Campaign input** (POST and PUT): `{name, discountType, discountValue, startsAt?, endsAt?,
+maxRedemptions?, ticketTypeIds}`. `name` is 1–100 characters; `endsAt` follows `startsAt`;
+`maxRedemptions` is 1–1,000,000 or `null` for unlimited; `ticketTypeIds` lists up to 50 distinct
+ticket types of this event (400 `validation_failed` on `ticketTypeIds` otherwise). The code and token
+never change. A cancelled event cannot get new or changed campaigns (409 `invalid_event_state`);
+enabling and disabling still work. Campaign changes are written to the audit log.
+
+**Promo lookup** (`GET /events/:id/promo`): send exactly one of `code` (case-insensitive) or
+`campaign` (the link token). The event must be published and public or unlisted (else 404). It
+returns **Promo** `{ code, name, discountType, discountValue, ticketTypeIds, endsAt }`, so a scanned
+campaign link can show and pre-fill its code. The lookup does not reserve anything; checkout checks
+again. Failures, each a 409:
+
+| code | meaning |
+|---|---|
+| `promo_not_found` | no campaign of this event has the code or token |
+| `promo_disabled` | the organizer disabled the campaign |
+| `promo_not_started` | before `startsAt` |
+| `promo_expired` | at or after `endsAt` |
+| `promo_exhausted` | `maxRedemptions` reached |
+| `promo_not_applicable` | checkout only: none of the selected tickets is discounted |
+
+**Discount at checkout**: computed on the subtotal of the applicable items. `percent` rounds to whole
+KZT (half up); `fixed` is taken once per order and never exceeds the applicable subtotal. A discount
+that brings the total to 0 completes the order without payment. Redemptions count paid orders and
+pending orders with an active hold, and the limit is enforced while the campaign row is locked, so
+concurrent checkouts never exceed `maxRedemptions`. Refunded, cancelled and expired orders free their
+redemption. The processing fee applies to the discounted total.
