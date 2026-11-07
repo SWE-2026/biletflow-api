@@ -27,6 +27,7 @@ type Event struct {
 	EndsAt               time.Time  `json:"endsAt"`
 	RegistrationOpensAt  *time.Time `json:"registrationOpensAt"`
 	RegistrationClosesAt *time.Time `json:"registrationClosesAt"`
+	RefundPolicy         string     `json:"refundPolicy"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
 }
@@ -45,18 +46,19 @@ type EventInput struct {
 	EndsAt               time.Time  `json:"endsAt"`
 	RegistrationOpensAt  *time.Time `json:"registrationOpensAt"`
 	RegistrationClosesAt *time.Time `json:"registrationClosesAt"`
+	RefundPolicy         string     `json:"refundPolicy"`
 }
 
 const eventColumns = `id, organizer_id, title, description, category, image_url, venue_name,
  venue_address, timezone, visibility, capacity, status, starts_at, ends_at,
- registration_opens_at, registration_closes_at, created_at, updated_at`
+ registration_opens_at, registration_closes_at, refund_policy, created_at, updated_at`
 
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
 	err := row.Scan(&e.ID, &e.OrganizerID, &e.Title, &e.Description, &e.Category, &e.ImageURL,
 		&e.VenueName, &e.VenueAddress, &e.Timezone, &e.Visibility, &e.Capacity, &e.Status,
 		&e.StartsAt, &e.EndsAt, &e.RegistrationOpensAt, &e.RegistrationClosesAt,
-		&e.CreatedAt, &e.UpdatedAt)
+		&e.RefundPolicy, &e.CreatedAt, &e.UpdatedAt)
 	return e, notFound(err)
 }
 
@@ -64,11 +66,11 @@ func (p *Postgres) CreateEvent(ctx context.Context, organizerID string, in Event
 	return scanEvent(p.pool.QueryRow(ctx,
 		`INSERT INTO events (organizer_id, title, description, category, image_url, venue_name,
 		 venue_address, timezone, visibility, capacity, starts_at, ends_at,
-		 registration_opens_at, registration_closes_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+eventColumns,
+		 registration_opens_at, registration_closes_at, refund_policy)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+eventColumns,
 		organizerID, in.Title, in.Description, in.Category, in.ImageURL, in.VenueName,
 		in.VenueAddress, in.Timezone, in.Visibility, in.Capacity, in.StartsAt, in.EndsAt,
-		in.RegistrationOpensAt, in.RegistrationClosesAt))
+		in.RegistrationOpensAt, in.RegistrationClosesAt, in.RefundPolicy))
 }
 
 func (p *Postgres) EventByOwner(ctx context.Context, organizerID, id string) (Event, error) {
@@ -113,11 +115,11 @@ func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, id string, in E
 		e, err = scanEvent(tx.QueryRow(ctx,
 			`UPDATE events SET title=$2, description=$3, category=$4, image_url=$5, venue_name=$6,
 			 venue_address=$7, timezone=$8, visibility=$9, capacity=$10, starts_at=$11, ends_at=$12,
-			 registration_opens_at=$13, registration_closes_at=$14, updated_at=now()
+			 registration_opens_at=$13, registration_closes_at=$14, refund_policy=$15, updated_at=now()
 			 WHERE id=$1 RETURNING `+eventColumns,
 			id, in.Title, in.Description, in.Category, in.ImageURL, in.VenueName,
 			in.VenueAddress, in.Timezone, in.Visibility, in.Capacity, in.StartsAt, in.EndsAt,
-			in.RegistrationOpensAt, in.RegistrationClosesAt))
+			in.RegistrationOpensAt, in.RegistrationClosesAt, in.RefundPolicy))
 		return err
 	})
 	return e, err

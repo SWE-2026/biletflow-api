@@ -35,6 +35,7 @@ func decodeEvent(c echo.Context) (store.EventInput, error) {
 	in.VenueName = strings.TrimSpace(in.VenueName)
 	in.VenueAddress = strings.TrimSpace(in.VenueAddress)
 	in.Timezone = strings.TrimSpace(in.Timezone)
+	in.RefundPolicy = strings.TrimSpace(in.RefundPolicy)
 	if in.ImageURL != nil {
 		image := strings.TrimSpace(*in.ImageURL)
 		in.ImageURL = &image
@@ -58,6 +59,7 @@ func validateEvent(in store.EventInput) error {
 	fe.check(in.RegistrationOpensAt == nil || in.RegistrationClosesAt == nil || in.RegistrationClosesAt.After(*in.RegistrationOpensAt), "registrationClosesAt", "Registration close must follow open.")
 	fe.check(in.RegistrationOpensAt == nil || in.RegistrationOpensAt.Before(in.StartsAt), "registrationOpensAt", "Registration must open before the event starts.")
 	fe.check(in.RegistrationClosesAt == nil || in.RegistrationClosesAt.Before(in.StartsAt), "registrationClosesAt", "Registration must close before the event starts.")
+	fe.check(len(in.RefundPolicy) <= 2000, "refundPolicy", "Use up to 2000 characters.")
 	return fe.err()
 }
 

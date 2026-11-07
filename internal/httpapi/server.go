@@ -65,6 +65,11 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.GET("/events", s.listEvents)
 	v1.GET("/events/:id", s.getPublicEvent)
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
+	v1.POST("/events/:id/checkout", s.checkout, s.requireAuth)
+	v1.GET("/me/orders", s.listMyOrders, s.requireAuth)
+	v1.GET("/me/orders/:id", s.getMyOrder, s.requireAuth)
+	v1.POST("/me/orders/:id/pay", s.payMyOrder, s.requireAuth)
+	v1.POST("/me/orders/:id/cancel", s.cancelMyOrder, s.requireAuth)
 
 	organizer := v1.Group("/organizer", s.requireAuth)
 	organizer.POST("/profile", s.createOrganizer)
@@ -82,6 +87,12 @@ func (s *Server) routes(v1 *echo.Group) {
 	events.POST("/:id/ticket-types", s.createTicketType)
 	events.PUT("/:id/ticket-types/:typeId", s.updateTicketType)
 	events.DELETE("/:id/ticket-types/:typeId", s.deleteTicketType)
+	events.GET("/:id/paid-sales", s.getPaidSales)
+	events.POST("/:id/paid-sales/activate", s.activatePaidSales)
+	events.GET("/:id/sales", s.getEventSales)
+	events.GET("/:id/orders", s.listEventOrders)
+	events.POST("/:id/orders/:orderId/refund", s.refundOrder)
+	events.POST("/:id/orders/:orderId/cancel", s.cancelRegistration)
 }
 
 // authRateLimit slows down code and password guessing: about one request per second per IP, with bursts of 10.
