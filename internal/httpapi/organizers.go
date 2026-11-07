@@ -54,7 +54,7 @@ func (s *Server) updateOrganizer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	o, err := s.db.UpdateOrganizer(c.Request().Context(), organizerID(c), in)
+	o, err := s.db.UpdateOrganizer(c.Request().Context(), currentUser(c).ID, organizerID(c), in)
 	if err != nil {
 		return err
 	}

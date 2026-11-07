@@ -63,8 +63,11 @@ func (p *Postgres) CreateOrganizer(ctx context.Context, userID string, in Organi
 		if err != nil {
 			return fmt.Errorf("create organizer: %w", err)
 		}
-		_, err = tx.Exec(ctx, `UPDATE users SET role='organizer', organizer_id=$1 WHERE id=$2`, o.ID, userID)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE users SET role='organizer', organizer_id=$1 WHERE id=$2`, o.ID, userID); err != nil {
+			return err
+		}
+		return writeAudit(ctx, tx, auditEntry{actorID: userID, action: "organizer.created", entityType: "organizer",
+			entityID: o.ID, details: map[string]any{"name": o.Name}})
 	})
 	if err != nil {
 		return Organizer{}, User{}, err
@@ -77,9 +80,19 @@ func (p *Postgres) OrganizerByID(ctx context.Context, id string) (Organizer, err
 	return scanOrganizer(p.pool.QueryRow(ctx, `SELECT `+organizerColumns+` FROM organizers WHERE id=$1`, id))
 }
 
-func (p *Postgres) UpdateOrganizer(ctx context.Context, id string, in OrganizerInput) (Organizer, error) {
-	return scanOrganizer(p.pool.QueryRow(ctx,
-		`UPDATE organizers SET type=$2, name=$3, contact_email=$4, contact_phone=$5,
-		 payout_account_reference=$6 WHERE id=$1 RETURNING `+organizerColumns,
-		id, in.Type, in.Name, in.ContactEmail, in.ContactPhone, in.PayoutAccountReference))
+func (p *Postgres) UpdateOrganizer(ctx context.Context, actorID, id string, in OrganizerInput) (Organizer, error) {
+	var o Organizer
+	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
+		var err error
+		o, err = scanOrganizer(tx.QueryRow(ctx,
+			`UPDATE organizers SET type=$2, name=$3, contact_email=$4, contact_phone=$5,
+			 payout_account_reference=$6 WHERE id=$1 RETURNING `+organizerColumns,
+			id, in.Type, in.Name, in.ContactEmail, in.ContactPhone, in.PayoutAccountReference))
+		if err != nil {
+			return err
+		}
+		return writeAudit(ctx, tx, auditEntry{actorID: actorID, action: "organizer.updated", entityType: "organizer",
+			entityID: id, details: map[string]any{"name": o.Name}})
+	})
+	return o, err
 }

@@ -72,6 +72,8 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.GET("/me/orders/:id", s.getMyOrder, s.requireAuth)
 	v1.POST("/me/orders/:id/pay", s.payMyOrder, s.requireAuth)
 	v1.POST("/me/orders/:id/cancel", s.cancelMyOrder, s.requireAuth)
+	v1.POST("/me/orders/:id/dispute", s.openDispute, s.requireAuth)
+	v1.GET("/me/disputes", s.listMyDisputes, s.requireAuth)
 
 	staff := v1.Group("/staff", s.requireAuth)
 	staff.GET("/events", s.listStaffEvents)
@@ -128,6 +130,7 @@ func (s *Server) organizerEventRoutes(events *echo.Group) {
 	events.GET("/:id/analytics", s.getEventAnalytics)
 	events.GET("/:id/activity", s.listEventActivity)
 	events.GET("/:id/attendees", s.listEventAttendees)
+	events.GET("/:id/disputes", s.listEventDisputes)
 	events.GET("/:id/staff", s.listStaff)
 	events.POST("/:id/staff", s.assignStaff)
 	events.DELETE("/:id/staff/:userId", s.removeStaff)

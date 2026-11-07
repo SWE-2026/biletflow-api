@@ -182,6 +182,12 @@ func (p *Postgres) AssignSupportCase(ctx context.Context, v SupportViewer, caseI
 		if _, err := tx.Exec(ctx, `UPDATE support_cases SET assignee_id = $2 WHERE id = $1`, caseID, assigneeID); err != nil {
 			return err
 		}
+		if lc.eventID != nil {
+			if err := writeAudit(ctx, tx, auditEntry{eventID: *lc.eventID, actorID: v.UserID, action: "support.assigned",
+				entityType: "support_case", entityID: caseID, details: map[string]any{"assignee": email}}); err != nil {
+				return err
+			}
+		}
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "assignment", email); err != nil {
 			return err
 		}

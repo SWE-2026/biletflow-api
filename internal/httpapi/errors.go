@@ -57,6 +57,7 @@ var knownErrors = []struct {
 	{store.ErrFreeOrder, newError(http.StatusConflict, "free_order", "Free registrations are cancelled, not refunded.")},
 	{store.ErrForbidden, errForbidden},
 	{store.ErrStateConflict, newError(http.StatusConflict, "invalid_state", "This action is not allowed in the current state.")},
+	{store.ErrAlreadyDisputed, newError(http.StatusConflict, "already_disputed", "This order already has an open dispute.")},
 	{store.ErrAlreadyReported, newError(http.StatusConflict, "already_reported", "You have already reported this event. The platform team will review it.")},
 	{store.ErrInvalidAssignee, &Error{Status: http.StatusBadRequest, Code: "validation_failed", Message: "Some fields are invalid.",
 		Fields: map[string]string{"assigneeId": "This person cannot handle this case."}}},

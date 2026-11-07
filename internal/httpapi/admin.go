@@ -40,6 +40,8 @@ func (s *Server) adminRoutes(admin *echo.Group) {
 	admin.GET("/orders", s.adminOrders)
 	admin.GET("/payments", s.adminPayments)
 	admin.GET("/refunds", s.adminRefunds)
+	admin.GET("/disputes", s.adminDisputes)
+	admin.POST("/disputes/:disputeId/resolve", s.resolveDispute)
 	admin.GET("/paid-sales", s.adminActivations)
 	admin.GET("/campaigns", s.adminCampaigns)
 	admin.GET("/reports", s.adminReports)

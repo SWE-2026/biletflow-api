@@ -62,26 +62,7 @@ func (p *Postgres) RefundOrder(ctx context.Context, organizerID, actorID, eventI
 		case total == 0:
 			return ErrFreeOrder
 		}
-		var paymentID, refundID string
-		if err := tx.QueryRow(ctx,
-			`UPDATE payments SET status = 'refunded' WHERE order_id = $1 AND status = 'succeeded' RETURNING id`,
-			orderID).Scan(&paymentID); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO refunds (payment_id, amount, status, reason, provider_refund_id, created_by)
-			 VALUES ($1, $2, 'succeeded', NULLIF($3, ''), $4, $5) RETURNING id`,
-			paymentID, total, reason, "demo_"+rand.Text(), actorID).Scan(&refundID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE orders SET status = 'refunded', refunded_at = now() WHERE id = $1`, orderID); err != nil {
-			return err
-		}
-		if err := invalidateTickets(ctx, tx, orderID, "refunded"); err != nil {
-			return err
-		}
-		return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "refund.succeeded",
-			entityType: "refund", entityID: refundID, details: map[string]any{"orderId": orderID, "amount": total, "demo": true}})
+		return refundPaidOrder(ctx, tx, actorID, eventID, orderID, reason, total)
 	})
 	if err != nil {
 		return OrganizerOrder{}, err
@@ -113,4 +94,27 @@ func (p *Postgres) CancelRegistration(ctx context.Context, organizerID, actorID,
 		return OrganizerOrder{}, err
 	}
 	return loadOrder(ctx, p.pool, `o.id = $1`, orderID)
+}
+
+func refundPaidOrder(ctx context.Context, tx pgx.Tx, actorID, eventID, orderID, reason string, total int64) error {
+	var paymentID, refundID string
+	if err := tx.QueryRow(ctx,
+		`UPDATE payments SET status = 'refunded' WHERE order_id = $1 AND status = 'succeeded' RETURNING id`,
+		orderID).Scan(&paymentID); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO refunds (payment_id, amount, status, reason, provider_refund_id, created_by)
+		 VALUES ($1, $2, 'succeeded', NULLIF($3, ''), $4, $5) RETURNING id`,
+		paymentID, total, reason, "demo_"+rand.Text(), actorID).Scan(&refundID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE orders SET status = 'refunded', refunded_at = now() WHERE id = $1`, orderID); err != nil {
+		return err
+	}
+	if err := invalidateTickets(ctx, tx, orderID, "refunded"); err != nil {
+		return err
+	}
+	return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "refund.succeeded",
+		entityType: "refund", entityID: refundID, details: map[string]any{"orderId": orderID, "amount": total, "demo": true}})
 }

@@ -12,7 +12,7 @@ import (
 const maxActivityEntries = 1000
 
 var ActivityTypes = []string{"event", "ticket_type", "paid_sales", "payment", "refund", "registration",
-	"staff", "campaign", "check_in", "support", "report"}
+	"staff", "campaign", "check_in", "support", "report", "dispute"}
 
 type ActivityEntry struct {
 	ID          string    `json:"id"`
@@ -22,7 +22,7 @@ type ActivityEntry struct {
 	Action      string    `json:"action"`
 	Type        string    `json:"type"`
 	EntityType  string    `json:"entityType"`
-	EntityID    string    `json:"entityId"`
+	EntityID    *string   `json:"entityId"`
 	Description string    `json:"description"`
 }
 
@@ -88,6 +88,8 @@ var fixedDescriptions = map[string]string{
 	"paid_sales.restored":    "Paid sales restored by the platform",
 	"report.dismissed":       "Event report dismissed",
 	"report.actioned":        "Event report actioned",
+	"dispute.refunded":       "Dispute resolved with a full demo refund",
+	"dispute.rejected":       "Dispute rejected",
 }
 
 func describeActivity(action string, d map[string]any) string {
@@ -117,6 +119,10 @@ func describeActivity(action string, d map[string]any) string {
 		return fmt.Sprintf("Campaign %q created", d["name"])
 	case "campaign.updated":
 		return fmt.Sprintf("Campaign %q updated", d["name"])
+	case "dispute.opened":
+		return fmt.Sprintf("Buyer opened a payment dispute (%v)", d["reason"])
+	case "support.assigned":
+		return fmt.Sprintf("Support case assigned to %v", d["assignee"])
 	case "support.status_changed":
 		return fmt.Sprintf("Support case status changed to %v", d["status"])
 	}

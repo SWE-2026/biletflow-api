@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified`, `account_suspended` |
 | 404 | `not_found`, `user_not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported` |
+| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported`, `already_disputed` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -85,6 +85,8 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/me/orders/:id` 🔒 | — | `{order, tickets}` |
 | POST | `/me/orders/:id/pay` 🔒 | `{outcome}` | `{order, payment}`: records a **demo** payment |
 | POST | `/me/orders/:id/cancel` 🔒 | — | `{order}`: abandons a pending order and releases its hold |
+| POST | `/me/orders/:id/dispute` 🔒 | `{reason, details?}` | 201 `{dispute}`: disputes a paid order |
+| GET | `/me/disputes` 🔒 | — | `{disputes}`: the current user's disputes |
 | POST | `/organizer/profile` 🔒 | Organizer input | 201 `{organizer, user}`; verified customer account only |
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
@@ -121,6 +123,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/events/:id/analytics` 🔒 | — | `{analytics}`; filters `from`, `to`, `ticketTypeId` |
 | GET | `/organizer/events/:id/activity` 🔒 | — | `{activity}`: timeline; filters `from`, `to`, `type` |
 | GET | `/organizer/events/:id/attendees` 🔒 | — | `{tickets}`: StaffTicket list; filters `ticketTypeId`, `status`, `q` |
+| GET | `/organizer/events/:id/disputes` 🔒 | — | `{disputes}`: disputes on the event's orders |
 | GET | `/organizer/events/:id/staff` 🔒 | — | `{staff}`: the event's assigned Event Admins |
 | POST | `/organizer/events/:id/staff` 🔒 | `{email, role}` | `{staffMember}`: assigns or changes a role |
 | DELETE | `/organizer/events/:id/staff/:userId` 🔒 | — | 204 |
@@ -440,7 +443,7 @@ matches attendee or account name or email.
 action, type, entityType, entityId, description }`, oldest first, up to 1000 entries. `action` is
 `<type>.<verb>`, e.g. `event.published`; `description` is a short English summary. The `type`
 filter takes one of `event`, `ticket_type`, `paid_sales`, `payment`, `refund`, `registration`,
-`staff`, `campaign`, `check_in`, `support`. Recorded actions:
+`staff`, `campaign`, `check_in`, `support`, `report`, `dispute`. Recorded actions:
 
 - `event.created`, `event.duplicated`, `event.updated` (with capacity changes), `event.published`,
   `event.unpublished`, `event.cancelled`
@@ -449,9 +452,15 @@ filter takes one of `event`, `ticket_type`, `paid_sales`, `payment`, `refund`, `
   `registration.cancelled`
 - `staff.assigned`, `staff.removed`, `campaign.created`, `campaign.updated`, `campaign.enabled`,
   `campaign.disabled`
-- `check_in.recorded`, `check_in.reversed`, `support.status_changed` (cases linked to the event)
+- `check_in.recorded`, `check_in.reversed`, `support.status_changed` and `support.assigned` (cases
+  linked to the event)
+- `event.suspended`, `event.restored`, `paid_sales.suspended`, `paid_sales.restored`,
+  `report.dismissed`, `report.actioned`, `dispute.opened`, `dispute.refunded`, `dispute.rejected`
 
-Entries are append-only; no route edits or deletes them.
+`entityId` may be `null` for entries without a single affected record. Entries are append-only; no
+route edits or deletes them. Organizer profile changes (`organizer.created`, `organizer.updated`), user
+suspensions (`user.suspended`, `user.restored`) and platform settings changes (`settings.updated`)
+are also audited; they belong to no event, so they do not appear in event timelines.
 
 **Duplicate** (`POST .../duplicate`): creates a new `draft` owned by the same organizer with the
 event's details, capacity, refund policy and dates, and copies of its ticket types (sales windows
@@ -490,6 +499,8 @@ Organizer accounts are not promoted.
 | GET | `/admin/orders` | `q` (order ID, buyer or attendee email, event title), `status` | `{orders}`: OrganizerOrder |
 | GET | `/admin/payments` | `q`, `status` (`failed` lists payment failures) | `{payments}`: AdminPayment |
 | GET | `/admin/refunds` | — | `{refunds}`: AdminRefund |
+| GET | `/admin/disputes` | `status` (`open`, `refunded`, `rejected`) | `{disputes}`: Dispute |
+| POST | `/admin/disputes/:disputeId/resolve` | `{decision, note}` | `{dispute}` |
 | GET | `/admin/paid-sales` | `status` (`active`, `suspended`) | `{paidSales}`: AdminActivation |
 | GET | `/admin/campaigns` | — | `{campaigns}`: every campaign with stats |
 | GET | `/admin/reports` | `status` (`open`, `dismissed`, `actioned`) | `{reports}`: EventReport |
@@ -513,6 +524,17 @@ suspendedAt }`.
 **Settings**: `{ activationFeeAmount, processingFeePercent, updatedAt }`. The fee is 0–10,000,000 KZT
 and the percentage 0–20. New values apply to activations and orders created afterwards.
 
+**Disputes** (SRS 2.3, 4.12): a basic dispute record; advanced dispute workflows are out of scope
+(SRS 8). The buyer disputes a `paid` order with a total above 0 (409 `invalid_order_state` or
+`free_order` otherwise; someone else's order is 404). `reason` is `not_received | event_cancelled |
+not_as_described | duplicate_charge | other`, `details` up to 2000 characters. One open dispute per
+order (409 `already_disputed`). An admin resolves it with `decision` `refund` (runs the full demo
+refund; an order the organizer already refunded is just closed) or `reject`, and a `note` of 1–500
+characters. Resolving a closed dispute is 409 `invalid_state`. **Dispute**: `{ id, orderId, eventId,
+eventTitle, buyerEmail, amount, reason, details, status, resolutionNote, demo, createdAt, resolvedAt }`;
+`status` is `open | refunded | rejected`. Opening and resolving appear in the event timeline (type
+`dispute`).
+
 **Event reports**: `POST /events/:id/report` takes `reason` (`fraud | inappropriate | misleading |
 other`) and optional `details` (up to 2000 characters) for a published public or unlisted event
 (404 otherwise). One open report per user and event (409 `already_reported`). **EventReport**:
@@ -520,7 +542,7 @@ other`) and optional `details` (up to 2000 characters) for a published public or
 reviewedAt }`. Resolving an already resolved report is 409 `invalid_state`.
 
 Admin suspensions, restorations and report decisions are written to the audit log; event-related ones
-appear in that event's timeline (types `event`, `paid_sales`, `report`).
+appear in that event's timeline (types `event`, `paid_sales`, `report`, `dispute`).
 
 **CSV export**: comma-separated with a header row; money is whole KZT and times are RFC 3339 UTC.
 Cells that start with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'` so spreadsheet
