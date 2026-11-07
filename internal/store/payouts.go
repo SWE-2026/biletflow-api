@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,9 +55,22 @@ func (p *Postgres) AdminPayouts(ctx context.Context, status string) ([]Payout, e
 }
 
 type scheduledPayout struct {
-	id      string
-	eventID string
-	status  string
+	id          string
+	eventID     string
+	organizerID string
+	status      string
+}
+
+var payoutMessages = map[string]string{
+	"scheduled": "is scheduled",
+	"on_hold":   "is on hold while the platform reviews the event",
+	"paid":      "has been marked as paid",
+}
+
+func notifyPayout(ctx context.Context, tx pgx.Tx, sp scheduledPayout) error {
+	return notifyOrganizer(ctx, tx, sp.organizerID, sp.eventID, notice{kind: "payout_status", link: "/organizer/payouts",
+		title: "Payout status: " + strings.ReplaceAll(sp.status, "_", " "),
+		body:  "Your demo payout for this event " + payoutMessages[sp.status] + ". Payouts are simulated; no real money moves."})
 }
 
 func (p *Postgres) SchedulePayouts(ctx context.Context, actorID string) ([]Payout, error) {
@@ -79,13 +93,13 @@ func (p *Postgres) SchedulePayouts(ctx context.Context, actorID string) ([]Payou
 			  FROM orders WHERE event_id = e.id) s
 			 WHERE e.ends_at < now()
 			 ON CONFLICT (event_id) DO NOTHING
-			 RETURNING id, event_id, status`)
+			 RETURNING id, event_id, organizer_id, status`)
 		if err != nil {
 			return err
 		}
 		created, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (scheduledPayout, error) {
 			var sp scheduledPayout
-			err := row.Scan(&sp.id, &sp.eventID, &sp.status)
+			err := row.Scan(&sp.id, &sp.eventID, &sp.organizerID, &sp.status)
 			return sp, err
 		})
 		if err != nil {
@@ -94,6 +108,9 @@ func (p *Postgres) SchedulePayouts(ctx context.Context, actorID string) ([]Payou
 		for _, sp := range created {
 			if err := writeAudit(ctx, tx, auditEntry{eventID: sp.eventID, actorID: actorID, action: "payout." + sp.status,
 				entityType: "payout", entityID: sp.id, details: map[string]any{"demo": true}}); err != nil {
+				return err
+			}
+			if err := notifyPayout(ctx, tx, sp); err != nil {
 				return err
 			}
 		}
@@ -118,13 +135,13 @@ func (p *Postgres) SetPayoutStatus(ctx context.Context, actorID, payoutID, to st
 	}
 	var po Payout
 	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
-		var eventID string
+		sp := scheduledPayout{id: payoutID, status: to}
 		err := tx.QueryRow(ctx,
 			`UPDATE payouts SET status = $3, updated_at = now(),
 			 paid_at = CASE WHEN $3 = 'paid' THEN now() END,
 			 provider_reference = CASE WHEN $3 = 'paid' THEN $4 ELSE provider_reference END
-			 WHERE id = $1 AND status = $2 RETURNING event_id`,
-			payoutID, from, to, "demo_"+rand.Text()).Scan(&eventID)
+			 WHERE id = $1 AND status = $2 RETURNING event_id, organizer_id`,
+			payoutID, from, to, "demo_"+rand.Text()).Scan(&sp.eventID, &sp.organizerID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			if _, lookupErr := scanPayout(tx.QueryRow(ctx, payoutSelect+` WHERE p.id = $1`, payoutID)); lookupErr != nil {
 				return lookupErr
@@ -134,8 +151,11 @@ func (p *Postgres) SetPayoutStatus(ctx context.Context, actorID, payoutID, to st
 		if err != nil {
 			return err
 		}
-		if err := writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "payout." + to,
+		if err := writeAudit(ctx, tx, auditEntry{eventID: sp.eventID, actorID: actorID, action: "payout." + to,
 			entityType: "payout", entityID: payoutID, details: map[string]any{"demo": true}}); err != nil {
+			return err
+		}
+		if err := notifyPayout(ctx, tx, sp); err != nil {
 			return err
 		}
 		po, err = scanPayout(tx.QueryRow(ctx, payoutSelect+` WHERE p.id = $1`, payoutID))

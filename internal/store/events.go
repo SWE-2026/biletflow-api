@@ -141,17 +141,24 @@ func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, actorID, id str
 		if err := checkCapacity(ctx, tx, id, "", in.Capacity, 0); err != nil {
 			return err
 		}
-		before, err := eventCapacity(ctx, tx, id)
+		before, err := scanEvent(tx.QueryRow(ctx, `SELECT `+eventColumns+` FROM events WHERE id=$1`, id))
 		if err != nil {
 			return err
 		}
 		details := map[string]any{}
-		if before != in.Capacity {
-			details["capacity"] = []int{before, in.Capacity}
+		if before.Capacity != in.Capacity {
+			details["capacity"] = []int{before.Capacity, in.Capacity}
 		}
 		if err := writeAudit(ctx, tx, auditEntry{eventID: id, actorID: actorID, action: "event.updated",
 			entityType: "event", entityID: id, details: details}); err != nil {
 			return err
+		}
+		if attendeeFacingChange(before, in) {
+			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_updated", link: "/events/" + id,
+				title: "Event updated: " + in.Title,
+				body:  "The organizer changed the date, time or venue of " + in.Title + ". Check the event page for the new details; your tickets stay valid."}); err != nil {
+				return err
+			}
 		}
 		e, err = scanEvent(tx.QueryRow(ctx,
 			`UPDATE events SET title=$2, description=$3, category=$4, image_url=$5, venue_name=$6,
@@ -165,6 +172,11 @@ func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, actorID, id str
 		return err
 	})
 	return e, err
+}
+
+func attendeeFacingChange(before Event, in EventInput) bool {
+	return before.Status == "published" && (!before.StartsAt.Equal(in.StartsAt) || !before.EndsAt.Equal(in.EndsAt) ||
+		before.VenueName != in.VenueName || before.VenueAddress != in.VenueAddress || before.Title != in.Title)
 }
 
 func (p *Postgres) TransitionEvent(ctx context.Context, organizerID, actorID, id, from, to string) (Event, error) {
@@ -189,6 +201,13 @@ func (p *Postgres) changeEventStatus(ctx context.Context, organizerID, actorID, 
 			id, organizerID, from, to))
 		if err != nil {
 			return err
+		}
+		if to == "cancelled" {
+			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_cancelled", link: "/events/" + id,
+				title: "Event cancelled: " + e.Title,
+				body:  e.Title + " has been cancelled by the organizer. Check your order for refund details or open a support case."}); err != nil {
+				return err
+			}
 		}
 		return writeAudit(ctx, tx, auditEntry{eventID: id, actorID: actorID, action: action,
 			entityType: "event", entityID: id, details: map[string]any{"status": to}})

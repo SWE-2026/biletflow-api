@@ -26,6 +26,8 @@ type Ticket struct {
 	OrderID        string      `json:"orderId"`
 	TicketTypeID   string      `json:"ticketTypeId"`
 	TicketTypeName string      `json:"ticketTypeName"`
+	AttendeeName   string      `json:"attendeeName"`
+	AttendeeEmail  string      `json:"attendeeEmail"`
 	Event          TicketEvent `json:"event"`
 }
 
@@ -65,13 +67,18 @@ func (w SaleWindow) Open(now time.Time) bool {
 	return now.Before(w.EventStartsAt)
 }
 
-const ticketSelect = `SELECT t.id, t.status, t.qr_token, t.created_at, o.id, tt.id, tt.name,
+const ticketFrom = `SELECT t.id, t.status, t.qr_token, t.created_at, o.id, tt.id, tt.name,
+ COALESCE(NULLIF(o.attendee_name, ''), NULLIF(u.display_name, ''), u.email),
+ COALESCE(NULLIF(o.attendee_email, ''), u.email),
  e.id, e.title, e.status, e.venue_name, e.venue_address, e.timezone, e.starts_at, e.ends_at
  FROM tickets t
  JOIN order_items oi ON oi.id = t.order_item_id
  JOIN orders o ON o.id = oi.order_id
  JOIN ticket_types tt ON tt.id = oi.ticket_type_id
  JOIN events e ON e.id = tt.event_id
+ JOIN users u ON u.id = t.owner_id`
+
+const ticketSelect = ticketFrom + `
  WHERE t.owner_id = $1`
 
 const ticketOrder = ` ORDER BY e.starts_at, t.created_at, t.id`
@@ -79,7 +86,7 @@ const ticketOrder = ` ORDER BY e.starts_at, t.created_at, t.id`
 func scanTicket(row pgx.Row) (Ticket, error) {
 	var t Ticket
 	err := row.Scan(&t.ID, &t.Status, &t.QRToken, &t.CreatedAt, &t.OrderID, &t.TicketTypeID,
-		&t.TicketTypeName, &t.Event.ID, &t.Event.Title, &t.Event.Status, &t.Event.VenueName,
+		&t.TicketTypeName, &t.AttendeeName, &t.AttendeeEmail, &t.Event.ID, &t.Event.Title, &t.Event.Status, &t.Event.VenueName,
 		&t.Event.VenueAddress, &t.Event.Timezone, &t.Event.StartsAt, &t.Event.EndsAt)
 	return t, err
 }
@@ -98,6 +105,15 @@ func collectTickets(ctx context.Context, q querier, sql string, args ...any) ([]
 
 func (p *Postgres) ListUserTickets(ctx context.Context, userID string) ([]Ticket, error) {
 	return collectTickets(ctx, p.pool, ticketSelect+ticketOrder, userID)
+}
+
+func (p *Postgres) UserTicket(ctx context.Context, userID, ticketID string) (Ticket, error) {
+	t, err := scanTicket(p.pool.QueryRow(ctx, ticketSelect+` AND t.id = $2`, userID, ticketID))
+	return t, notFound(err)
+}
+
+func (p *Postgres) OrderTickets(ctx context.Context, orderID string) ([]Ticket, error) {
+	return collectTickets(ctx, p.pool, ticketFrom+` WHERE o.id = $1 AND t.status = 'valid'`+ticketOrder, orderID)
 }
 
 // soldTickets counts the ticket type's issued valid or used tickets plus the quantities held by
@@ -179,6 +195,9 @@ func (p *Postgres) RegisterFree(ctx context.Context, userID, eventID, ticketType
 		}
 		orderID, err := insertFreeOrder(ctx, tx, userID, eventID, ticketTypeID, quantity)
 		if err != nil {
+			return err
+		}
+		if err := notifyOrderIssued(ctx, tx, orderID); err != nil {
 			return err
 		}
 		tickets, err = collectTickets(ctx, tx, ticketSelect+` AND o.id = $2`+ticketOrder, userID, orderID)

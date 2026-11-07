@@ -7,9 +7,10 @@ import (
 )
 
 type Message struct {
-	To      string
-	Subject string
-	Text    string
+	To          string
+	Subject     string
+	Text        string
+	Attachments []Attachment
 }
 
 // LogMailer records that an email would have been sent. It logs the subject only: message bodies

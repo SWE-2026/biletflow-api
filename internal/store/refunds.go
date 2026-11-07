@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -87,6 +88,11 @@ func (p *Postgres) CancelRegistration(ctx context.Context, organizerID, actorID,
 		if err := invalidateTickets(ctx, tx, orderID, "cancelled"); err != nil {
 			return err
 		}
+		if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "registration_cancelled", link: "/me/orders/" + orderID,
+			title: "Registration cancelled",
+			body:  "The organizer cancelled your free registration. Its tickets are no longer valid."}); err != nil {
+			return err
+		}
 		return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "registration.cancelled",
 			entityType: "order", entityID: orderID, details: map[string]any{}})
 	})
@@ -113,6 +119,12 @@ func refundPaidOrder(ctx context.Context, tx pgx.Tx, actorID, eventID, orderID, 
 		return err
 	}
 	if err := invalidateTickets(ctx, tx, orderID, "refunded"); err != nil {
+		return err
+	}
+	if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "refund_completed", link: "/me/orders/" + orderID,
+		title: "Refund completed",
+		body: fmt.Sprintf("Your order was fully refunded (%d KZT, demo refund; no real money moved). "+
+			"Its tickets are no longer valid.", total)}); err != nil {
 		return err
 	}
 	return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "refund.succeeded",

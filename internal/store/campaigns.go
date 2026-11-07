@@ -184,3 +184,7 @@ func (p *Postgres) SetCampaignStatus(ctx context.Context, organizerID, actorID, 
 	})
 	return c, err
 }
+
+func (p *Postgres) Campaign(ctx context.Context, organizerID, eventID, id string) (Campaign, error) {
+	return p.campaign(ctx, p.pool, organizerID, eventID, id)
+}

@@ -138,7 +138,10 @@ func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in Chec
 		return "", err
 	}
 	if total == 0 {
-		return orderID, issueTickets(ctx, tx, orderID, userID)
+		if err := issueTickets(ctx, tx, orderID, userID); err != nil {
+			return "", err
+		}
+		return orderID, notifyOrderIssued(ctx, tx, orderID)
 	}
 	return orderID, nil
 }
@@ -239,13 +242,7 @@ func (p *Postgres) PayOrder(ctx context.Context, userID, orderID string, succeed
 			entityType: "payment", entityID: payment.payment.ID, details: map[string]any{"orderId": orderID, "amount": o.total, "demo": true}}); err != nil {
 			return err
 		}
-		if !succeed {
-			return nil
-		}
-		if _, err := tx.Exec(ctx, `UPDATE orders SET status='paid', paid_at=now() WHERE id=$1`, orderID); err != nil {
-			return err
-		}
-		return issueTickets(ctx, tx, orderID, userID)
+		return completePayment(ctx, tx, orderID, userID, succeed)
 	})
 	if err != nil {
 		return Order{}, Payment{}, err
@@ -266,4 +263,20 @@ func (p *Postgres) CancelPendingOrder(ctx context.Context, userID, orderID strin
 		err = ErrOrderState
 	}
 	return o.Order, err
+}
+
+func completePayment(ctx context.Context, tx pgx.Tx, orderID, userID string, succeed bool) error {
+	if !succeed {
+		return notifyOrderBuyer(ctx, tx, orderID, notice{kind: "payment_failed", link: "/me/orders/" + orderID,
+			title: "Payment failed",
+			body: "Your demo payment did not go through, so no tickets were issued. Your tickets stay reserved " +
+				"until the hold ends; you can try again from your order."})
+	}
+	if _, err := tx.Exec(ctx, `UPDATE orders SET status='paid', paid_at=now() WHERE id=$1`, orderID); err != nil {
+		return err
+	}
+	if err := issueTickets(ctx, tx, orderID, userID); err != nil {
+		return err
+	}
+	return notifyOrderIssued(ctx, tx, orderID)
 }

@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified`, `account_suspended` |
 | 404 | `not_found`, `user_not_found` |
-| 409 | `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported`, `already_disputed` |
+| 409 | `ticket_not_printable`, `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported`, `already_disputed` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -75,6 +75,12 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/auth/logout` 🔒 | — | 204 |
 | GET | `/me` 🔒 | — | `{user}` |
 | GET | `/me/tickets` 🔒 | — | `{tickets}`: the current user's tickets, ordered by event start |
+| GET | `/me/tickets/:id/pdf` 🔒 | — | print-ready PDF of one valid ticket |
+| GET | `/me/tickets/:id/qr` 🔒 | — | PNG of the ticket's admission QR code |
+| GET | `/me/orders/:id/tickets/pdf` 🔒 | — | PDF of the order's valid tickets, one per page |
+| GET | `/me/notifications?unread=true` 🔒 | — | `{notifications, unread}`, newest first, up to 100 |
+| POST | `/me/notifications/:id/read` 🔒 | — | 204 |
+| POST | `/me/notifications/read-all` 🔒 | — | 204 |
 | GET | `/events` | — | `{events}`: published **public** events |
 | GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
 | POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
@@ -120,6 +126,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | PUT | `/organizer/events/:id/campaigns/:campaignId` 🔒 | Campaign input | `{campaign}`; full replacement |
 | POST | `/organizer/events/:id/campaigns/:campaignId/enable` 🔒 | — | `{campaign}` |
 | POST | `/organizer/events/:id/campaigns/:campaignId/disable` 🔒 | — | `{campaign}` |
+| GET | `/organizer/events/:id/campaigns/:campaignId/qr` 🔒 | — | SVG Campaign QR code, server-generated |
 | POST | `/organizer/events/:id/duplicate` 🔒 | — | 201 `{event}`: a new draft copied from the event |
 | GET | `/organizer/events/:id/analytics` 🔒 | — | `{analytics}`; filters `from`, `to`, `ticketTypeId` |
 | GET | `/organizer/events/:id/activity` 🔒 | — | `{activity}`: timeline; filters `from`, `to`, `type` |
@@ -189,8 +196,9 @@ event, the response is 404. Checks run in this order, each a 409:
 Success creates one completed order (`totalAmount` 0) and `quantity` tickets with status `valid`.
 Concurrent registrations never oversell a ticket type.
 
-**Ticket**: `{ id, status, qrToken, createdAt, orderId, ticketTypeId, ticketTypeName, event: { id,
-title, status, venueName, venueAddress, timezone, startsAt, endsAt } }`. `status` is
+**Ticket**: `{ id, status, qrToken, createdAt, orderId, ticketTypeId, ticketTypeName, attendeeName,
+attendeeEmail, event: { id, title, status, venueName, venueAddress, timezone, startsAt, endsAt } }`.
+`attendeeName`/`attendeeEmail` come from the order's attendee details, falling back to the account. `status` is
 `valid | used | cancelled | refunded`. `qrToken` is the secret encoded in the ticket's QR code; clients show it
 only to the ticket owner and never log it.
 
@@ -327,9 +335,11 @@ ticketsSold, grossAmount, discountAmount, netAmount } }`. `discountType` is `per
 An empty `ticketTypeIds` means the campaign applies to every ticket type of the event.
 
 - `code` is a generated 10-character promo code (uppercase letters and digits) that buyers type.
-- `token` is an opaque link token (`cmp_…`). `linkPath` is `/events/:id?campaign=<token>`; the web app
-  prefixes its own HTTPS origin and renders the Campaign QR from that URL. Draw it so it looks
-  clearly different from an admission ticket QR.
+- `token` is an opaque link token (`cmp_…`). `linkPath` is `/events/:id?campaign=<token>`.
+- `GET .../campaigns/:campaignId/qr` returns the server-generated Campaign QR image (SVG, SRS 9). It
+  encodes `PUBLIC_WEB_URL` + `linkPath` and is drawn to be clearly different from an admission
+  ticket: dark blue modules, a dashed border, the heading "PROMO · NOT A TICKET", the promo code and
+  the campaign name. Admission endpoints never accept it (`campaign_qr`).
 - `stats` covers paid orders only: `redemptions` (orders), `ticketsSold` (valid and used tickets),
   `grossAmount` (before discount), `discountAmount` and `netAmount` (gross minus discount).
 
@@ -574,3 +584,45 @@ appear in that event's timeline (types `event`, `paid_sales`, `report`, `dispute
 **CSV export**: comma-separated with a header row; money is whole KZT and times are RFC 3339 UTC.
 Cells that start with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'` so spreadsheet
 apps do not run them as formulas.
+
+## Tickets: PDF and QR
+
+SRS 4.7, 8, 9. Tickets are rendered on the server from the canonical ticket record.
+
+- `GET /me/tickets/:id/pdf` and `GET /me/orders/:id/tickets/pdf` return an A4 PDF (one ticket per
+  page) with the event name, date and time in the event's time zone, venue name and address, ticket
+  type, attendee name, ticket ID and a large black-and-white QR code (about 85 mm, high error
+  correction) that scans from a grayscale printout. No payment details appear on it. Only `valid`
+  tickets print (409 `ticket_not_printable`); an order with no valid ticket is also 409.
+- `GET /me/tickets/:id/qr` returns the same QR code as a PNG for the in-app ticket.
+- The QR code encodes the ticket's `qrToken`, so the digital and printed copies are the same ticket:
+  one ID, one admission (a second scan returns `already_used`).
+- Ticket files are only served to the ticket owner (404 otherwise) and with `Cache-Control: no-store`.
+
+## Notifications
+
+SRS 4.10, 4.13. Every notification is stored for the in-app list and sent by email to the order's
+attendee email or the user's account email. Emails go out from a background queue (retried up to
+5 times); without `SMTP_HOST` they are only logged. Account verification and password reset codes
+are emailed directly by the auth endpoints.
+
+**Notification**: `{ id, kind, title, body, link, orderId, eventId, read, createdAt }`. `link` is a
+web-app path such as `/me/orders/<id>`. Kinds:
+
+| kind | sent to | when |
+|---|---|---|
+| `order_confirmed` | buyer | a registration or purchase is confirmed |
+| `tickets_delivered` | buyer | tickets are issued; the email attaches the tickets as a PDF |
+| `payment_failed` | buyer | a demo payment fails |
+| `event_updated` | every paid order of the event | a published event's title, date, time or venue changes |
+| `event_cancelled` | every paid order of the event | the organizer cancels the event |
+| `registration_cancelled` | buyer | the organizer cancels a free registration |
+| `refund_completed` | buyer | a demo refund completes (organizer or dispute) |
+| `payout_status` | the organizer's users | a demo payout is scheduled, put on hold or marked paid |
+| `support_message` | the other side of the case | a case is opened or gets a reply |
+| `support_assigned` | the new assignee | a case is assigned |
+| `support_status` | the requester | a handler changes the case status |
+
+Support notifications go to the assignee when there is one, otherwise to the event's organizer users
+(attendee cases) or to platform admins (organizer cases). The in-app `unread` count on
+`/support/cases/unread` is unchanged.

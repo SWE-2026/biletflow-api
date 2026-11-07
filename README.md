@@ -22,8 +22,11 @@ Organizer profiles and event creation are available through `/api/v1/organizer`.
 verified email first, then create a profile. The API contract documents the required event fields
 and lifecycle actions. The local database also contains one sample published event.
 
-Local mode (`APP_ENV=local`) returns one-time email codes in responses as `demoCode`, because no
-email provider is configured yet.
+Local mode (`APP_ENV=local`) returns one-time email codes in responses as `demoCode`. Without
+`SMTP_HOST` no email leaves the server; notifications are still stored and shown in the app.
+
+PDF tickets embed Noto Sans (`internal/tickets/fonts`, SIL Open Font License, see `OFL.txt`) so
+Kazakh, Russian and English text and the ₸ sign print correctly.
 
 ## Stack and rationale
 
@@ -50,6 +53,11 @@ Backups and recovery are described in [docs/operations.md](docs/operations.md).
 | `PORT` | `8080` | HTTP port |
 | `APP_ENV` | `production` | `local` exposes one-time codes as `demoCode`; never on a public server |
 | `CORS_ORIGINS` | none | comma-separated browser origins, e.g. `http://localhost:5173,http://localhost:8081` |
+| `PUBLIC_WEB_URL` | `http://localhost:5173` | web app origin used in email links and Campaign QR codes; use the HTTPS origin in production |
+| `SMTP_HOST` | none | transactional email server; when unset, emails are logged (subject only) instead of sent |
+| `SMTP_PORT` | `587` | `587` uses STARTTLS (required), `465` uses implicit TLS |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | none | SMTP credentials; keep them in the environment or a secret store, never in the repo |
+| `MAIL_FROM` | — (required with `SMTP_HOST`) | sender address, e.g. `tickets@biletflow.kz` |
 | `ADMIN_EMAILS` | none | comma-separated emails promoted to platform admin on start; each account must exist and be a plain customer account |
 
 ## Checks

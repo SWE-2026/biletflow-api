@@ -27,6 +27,12 @@ services:
       APP_ENV: local
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:5173}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     ports:
       - "8080:8080"
 

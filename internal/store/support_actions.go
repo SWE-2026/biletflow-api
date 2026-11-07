@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -87,6 +88,11 @@ func (p *Postgres) CreateSupportCase(ctx context.Context, v SupportViewer, in Su
 		if err := insertSupportMessage(ctx, tx, id, v.UserID, "message", in.Message); err != nil {
 			return err
 		}
+		if err := notifyCaseHandlers(ctx, tx, lockedCase{kind: in.Kind, organizerID: cc.organizerID, eventID: cc.eventID},
+			notice{kind: "support_message", link: "/support/cases/" + id,
+				title: "New support case: " + in.Subject, body: "A new support case was opened. Open it to reply."}); err != nil {
+			return err
+		}
 		if err := markCaseRead(ctx, tx, id, v.UserID); err != nil {
 			return err
 		}
@@ -109,15 +115,37 @@ type lockedCase struct {
 	status      string
 	role        string
 	eventID     *string
+	requesterID string
+	assigneeID  *string
+}
+
+func (lc lockedCase) event() string {
+	if lc.eventID == nil {
+		return ""
+	}
+	return *lc.eventID
+}
+
+func notifyCaseHandlers(ctx context.Context, tx pgx.Tx, lc lockedCase, n notice) error {
+	switch {
+	case lc.assigneeID != nil:
+		return notifyUser(ctx, tx, *lc.assigneeID, lc.event(), n)
+	case lc.kind == "attendee":
+		return notifyOrganizer(ctx, tx, lc.organizerID, lc.event(), n)
+	default:
+		return notifyAdmins(ctx, tx, n)
+	}
 }
 
 func lockCase(ctx context.Context, tx pgx.Tx, v SupportViewer, caseID string) (lockedCase, error) {
 	var lc lockedCase
 	err := tx.QueryRow(ctx,
 		`SELECT c.kind, c.organizer_id::text, c.status,
-		 CASE WHEN c.requester_id = $1 THEN 'requester' ELSE 'handler' END, c.event_id::text
+		 CASE WHEN c.requester_id = $1 THEN 'requester' ELSE 'handler' END, c.event_id::text,
+		 c.requester_id, c.assignee_id::text
 		 FROM support_cases c WHERE c.id = $4 AND `+caseAccess+` FOR UPDATE`,
-		append(v.args(), caseID)...).Scan(&lc.kind, &lc.organizerID, &lc.status, &lc.role, &lc.eventID)
+		append(v.args(), caseID)...).Scan(&lc.kind, &lc.organizerID, &lc.status, &lc.role, &lc.eventID,
+		&lc.requesterID, &lc.assigneeID)
 	return lc, notFound(err)
 }
 
@@ -139,6 +167,15 @@ func (p *Postgres) AddSupportMessage(ctx context.Context, v SupportViewer, caseI
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "message", body); err != nil {
 			return err
 		}
+		n := notice{kind: "support_message", link: "/support/cases/" + caseID,
+			title: "New support message", body: "There is a new reply in a support case. Open the case to read it."}
+		notify := notifyCaseHandlers(ctx, tx, lc, n)
+		if lc.role == "handler" {
+			notify = notifyUser(ctx, tx, lc.requesterID, lc.event(), n)
+		}
+		if notify != nil {
+			return notify
+		}
 		return touchCase(ctx, tx, caseID, v.UserID, status)
 	})
 }
@@ -149,6 +186,11 @@ func (p *Postgres) SetSupportStatus(ctx context.Context, v SupportViewer, caseID
 			return ErrForbidden
 		}
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "status_change", status); err != nil {
+			return err
+		}
+		if err := notifyUser(ctx, tx, lc.requesterID, lc.event(), notice{kind: "support_status", link: "/support/cases/" + caseID,
+			title: "Support case " + strings.ReplaceAll(status, "_", " "),
+			body:  "The status of your support case changed to " + strings.ReplaceAll(status, "_", " ") + "."}); err != nil {
 			return err
 		}
 		if lc.eventID != nil {
@@ -190,6 +232,12 @@ func (p *Postgres) AssignSupportCase(ctx context.Context, v SupportViewer, caseI
 		}
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "assignment", email); err != nil {
 			return err
+		}
+		if assigneeID != nil {
+			if err := notifyUser(ctx, tx, *assigneeID, lc.event(), notice{kind: "support_assigned", link: "/support/cases/" + caseID,
+				title: "Support case assigned to you", body: "A support case was assigned to you. Open it to reply."}); err != nil {
+				return err
+			}
 		}
 		return touchCase(ctx, tx, caseID, v.UserID, lc.status)
 	})

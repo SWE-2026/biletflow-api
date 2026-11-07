@@ -5,6 +5,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +22,16 @@ type Config struct {
 	Env         string
 	CORSOrigins []string
 	AdminEmails []string
+	WebURL      string
+	SMTP        SMTP
+}
+
+type SMTP struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
 }
 
 func (c Config) IsLocal() bool { return c.Env == EnvLocal }
@@ -32,6 +43,21 @@ func Load() (Config, error) {
 		Env:         valueOr(os.Getenv("APP_ENV"), EnvProduction),
 		CORSOrigins: splitList(os.Getenv("CORS_ORIGINS")),
 		AdminEmails: splitList(strings.ToLower(os.Getenv("ADMIN_EMAILS"))),
+		WebURL:      strings.TrimRight(valueOr(os.Getenv("PUBLIC_WEB_URL"), "http://localhost:5173"), "/"),
+		SMTP: SMTP{
+			Host:     os.Getenv("SMTP_HOST"),
+			Username: os.Getenv("SMTP_USERNAME"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			From:     os.Getenv("MAIL_FROM"),
+		},
+	}
+	port, err := strconv.Atoi(valueOr(os.Getenv("SMTP_PORT"), "587"))
+	if err != nil || port <= 0 || port > 65535 {
+		return c, errors.New("SMTP_PORT must be a port number")
+	}
+	c.SMTP.Port = port
+	if c.SMTP.Host != "" && c.SMTP.From == "" {
+		return c, errors.New("MAIL_FROM is required when SMTP_HOST is set")
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")

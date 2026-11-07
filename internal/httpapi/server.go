@@ -22,6 +22,7 @@ type Options struct {
 	Logger      *slog.Logger
 	// NoAuthRateLimit turns off per-IP throttling of /auth endpoints. Tests only.
 	NoAuthRateLimit bool
+	WebURL          string
 }
 
 type Server struct {
@@ -62,6 +63,12 @@ func (s *Server) routes(v1 *echo.Group) {
 
 	v1.GET("/me", s.me, s.requireAuth)
 	v1.GET("/me/tickets", s.listMyTickets, s.requireAuth)
+	v1.GET("/me/tickets/:id/pdf", s.ticketPDF, s.requireAuth)
+	v1.GET("/me/tickets/:id/qr", s.ticketQR, s.requireAuth)
+	v1.GET("/me/orders/:id/tickets/pdf", s.orderTicketsPDF, s.requireAuth)
+	v1.GET("/me/notifications", s.listNotifications, s.requireAuth)
+	v1.POST("/me/notifications/read-all", s.readAllNotifications, s.requireAuth)
+	v1.POST("/me/notifications/:id/read", s.readNotification, s.requireAuth)
 	v1.GET("/events", s.listEvents)
 	v1.GET("/events/:id", s.getPublicEvent)
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
@@ -127,6 +134,7 @@ func (s *Server) organizerEventRoutes(events *echo.Group) {
 	events.PUT("/:id/campaigns/:campaignId", s.updateCampaign)
 	events.POST("/:id/campaigns/:campaignId/enable", s.enableCampaign)
 	events.POST("/:id/campaigns/:campaignId/disable", s.disableCampaign)
+	events.GET("/:id/campaigns/:campaignId/qr", s.campaignQR)
 	events.POST("/:id/duplicate", s.duplicateEvent)
 	events.GET("/:id/analytics", s.getEventAnalytics)
 	events.GET("/:id/activity", s.listEventActivity)
