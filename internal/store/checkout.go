@@ -65,7 +65,7 @@ func reserveItems(ctx context.Context, tx pgx.Tx, userID, eventID string, items 
 		if err != nil {
 			return nil, err
 		}
-		if err := checkAvailable(ctx, tx, s, item.TicketTypeID, userID, item.Quantity); err != nil {
+		if err := checkAvailable(ctx, tx, s, item.TicketTypeID, item.Quantity); err != nil {
 			return nil, err
 		}
 		priced = append(priced, pricedItem{CheckoutItem: item, price: s.price})

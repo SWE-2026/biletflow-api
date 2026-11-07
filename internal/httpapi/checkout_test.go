@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 
@@ -121,9 +123,24 @@ func completeProfile(t *testing.T, owner client, name string) {
 	owner.do(http.MethodPut, "/api/v1/organizer/profile", profile, http.StatusOK, nil)
 }
 
-func activate(owner client, eventID string) {
+func approveActivation(t *testing.T, eventID string) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := store.NewPostgres(ctx, os.Getenv("TEST_DB_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.ReviewPaidSales(ctx, "", eventID, true, "approved in test"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func activate(t *testing.T, owner client, eventID string) {
+	t.Helper()
 	owner.do(http.MethodPost, "/api/v1/organizer/events/"+eventID+"/paid-sales/activate",
 		activationInput{AcceptTerms: true}, http.StatusOK, nil)
+	approveActivation(t, eventID)
 }
 
 func paidEvent(t *testing.T, e *echo.Echo, name string, price int64, quantity, maxPerOrder int) (client, string, string) {
@@ -134,7 +151,7 @@ func paidEvent(t *testing.T, e *echo.Echo, name string, price int64, quantity, m
 	in := ticketTypeInput("Standard", quantity)
 	in.PriceAmount, in.MaxPerOrder = price, maxPerOrder
 	typeID := createTicketType(t, owner, eventID, in)
-	activate(owner, eventID)
+	activate(t, owner, eventID)
 	owner.do(http.MethodPost, "/api/v1/organizer/events/"+eventID+"/publish", nil, http.StatusOK, nil)
 	return owner, eventID, typeID
 }
@@ -161,10 +178,15 @@ func TestPaidSalesActivation(t *testing.T) {
 	createTicketType(t, owner, eventID, paid)
 	completeProfile(t, owner, "activation")
 	owner.do(http.MethodPost, base+"/activate", activationInput{AcceptTerms: true}, http.StatusOK, &got)
-	if got.PaidSales.Status != "active" || got.PaidSales.ActivatedAt == nil {
-		t.Fatalf("activation did not apply: %+v", got.PaidSales)
+	if got.PaidSales.Status != "pending" || got.PaidSales.RequestedAt == nil || got.PaidSales.ActivatedAt != nil {
+		t.Fatalf("activation request did not apply: %+v", got.PaidSales)
 	}
 	owner.do(http.MethodPost, base+"/activate", activationInput{AcceptTerms: true}, http.StatusOK, nil)
+	approveActivation(t, eventID)
+	owner.do(http.MethodGet, base, nil, http.StatusOK, &got)
+	if got.PaidSales.Status != "active" || got.PaidSales.ActivatedAt == nil {
+		t.Fatalf("approval did not activate: %+v", got.PaidSales)
+	}
 
 	other := createOrganizerClient(t, e, "activation-other")
 	other.do(http.MethodGet, base, nil, http.StatusNotFound, nil)

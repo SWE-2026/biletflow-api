@@ -73,9 +73,9 @@ func scanCase(row pgx.Row) (SupportCase, error) {
 	return c, notFound(err)
 }
 
-func (p *Postgres) ListSupportCases(ctx context.Context, v SupportViewer, status string) ([]SupportCase, error) {
-	rows, err := p.pool.Query(ctx, caseSelect+` AND ($4 = '' OR c.status = $4)
-		 ORDER BY c.last_activity_at DESC, c.id LIMIT $5`, append(v.args(), status, maxSupportCases)...)
+func (p *Postgres) ListSupportCases(ctx context.Context, v SupportViewer, status, eventID string) ([]SupportCase, error) {
+	rows, err := p.pool.Query(ctx, caseSelect+` AND ($4 = '' OR c.status = $4) AND ($6 = '' OR c.event_id::text = $6)
+		 ORDER BY c.last_activity_at DESC, c.id LIMIT $5`, append(v.args(), status, maxSupportCases, eventID)...)
 	if err != nil {
 		return nil, err
 	}

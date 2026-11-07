@@ -13,7 +13,7 @@ var (
 	orderStatuses      = []string{"pending", "paid", "cancelled", "refunded"}
 	paymentStatuses    = []string{"failed", "succeeded", "refunded"}
 	eventStatuses      = []string{"draft", "published", "cancelled", "suspended"}
-	activationStatuses = []string{"active", "suspended"}
+	activationStatuses = []string{"pending", "active", "suspended", "rejected"}
 	reportStatuses     = []string{"open", "dismissed", "actioned"}
 	reportReasons      = []string{"fraud", "inappropriate", "misleading", "other"}
 )
@@ -35,12 +35,19 @@ func (s *Server) adminRoutes(admin *echo.Group) {
 	admin.GET("/events/:id/activity", s.adminActivity)
 	admin.POST("/events/:id/suspend", s.suspendEvent)
 	admin.POST("/events/:id/restore", s.restoreEvent)
+	admin.POST("/events/:id/paid-sales/approve", s.approvePaidSales)
+	admin.POST("/events/:id/paid-sales/reject", s.rejectPaidSales)
 	admin.POST("/events/:id/paid-sales/suspend", s.suspendPaidSales)
 	admin.POST("/events/:id/paid-sales/restore", s.restorePaidSales)
 	admin.GET("/orders", s.adminOrders)
 	admin.GET("/payments", s.adminPayments)
 	admin.GET("/refunds", s.adminRefunds)
 	admin.GET("/disputes", s.adminDisputes)
+	admin.GET("/payouts", s.adminPayouts)
+	admin.POST("/payouts/schedule", s.schedulePayouts)
+	admin.POST("/payouts/:payoutId/mark-paid", s.markPayoutPaid)
+	admin.POST("/payouts/:payoutId/hold", s.holdPayout)
+	admin.POST("/payouts/:payoutId/release", s.releasePayout)
 	admin.POST("/disputes/:disputeId/resolve", s.resolveDispute)
 	admin.GET("/paid-sales", s.adminActivations)
 	admin.GET("/campaigns", s.adminCampaigns)

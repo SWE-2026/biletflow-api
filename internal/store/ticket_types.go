@@ -198,7 +198,7 @@ func checkNotBelowSold(ctx context.Context, tx pgx.Tx, eventID, id string, quant
 	if err != nil {
 		return notFound(err)
 	}
-	sold, _, err := soldTickets(ctx, tx, id, "")
+	sold, err := soldTickets(ctx, tx, id)
 	if err != nil {
 		return err
 	}

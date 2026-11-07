@@ -47,7 +47,7 @@ API runs with `APP_ENV=local` (no email provider yet).
 account number or payment credential. Creating a profile changes the current user's role to
 `organizer`; the response includes the updated user so clients can replace their stored session user.
 
-**Event**: `{ id, organizerId, title, description, category, imageUrl, venueName, venueAddress,
+**Event**: `{ id, organizerId, title, description, category, imageUrl, imageUrls, venueName, venueAddress,
 timezone, visibility, capacity, status, phase, startsAt, endsAt, registrationOpensAt,
 registrationClosesAt, refundPolicy, createdAt, updatedAt }`. `phase` is computed on each read:
 `cancelled` for a cancelled event, otherwise `upcoming` before `startsAt`, `active` until `endsAt`
@@ -90,6 +90,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/organizer/profile` 🔒 | Organizer input | 201 `{organizer, user}`; verified customer account only |
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
+| GET | `/organizer/payouts` 🔒 | — | `{payouts}`: the organizer's demo payouts, newest first |
 | POST | `/organizer/events` 🔒 | Event input | 201 `{event}` in `draft` state |
 | GET | `/organizer/events?phase=` 🔒 | — | `{events}`: current organizer's events, all states; optional `phase` filter |
 | GET | `/organizer/events/:id` 🔒 | — | `{event}` owned by current organizer |
@@ -102,13 +103,13 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | PUT | `/organizer/events/:id/ticket-types/:typeId` 🔒 | TicketType input | `{ticketType}`; full replacement |
 | DELETE | `/organizer/events/:id/ticket-types/:typeId` 🔒 | — | 204; only while the type has no orders |
 | GET | `/organizer/events/:id/paid-sales` 🔒 | — | `{paidSales}` |
-| POST | `/organizer/events/:id/paid-sales/activate` 🔒 | `{acceptTerms}` | `{paidSales}`: pays the **demo** activation fee |
+| POST | `/organizer/events/:id/paid-sales/activate` 🔒 | `{acceptTerms}` | `{paidSales}`: pays the **demo** activation fee and requests platform review |
 | GET | `/organizer/events/:id/sales` 🔒 | — | `{sales}` |
 | GET | `/organizer/events/:id/orders` 🔒 | — | `{orders}`: OrganizerOrder list, newest first |
 | POST | `/organizer/events/:id/orders/:orderId/refund` 🔒 | `{reason?}` | `{order}`: full **demo** refund of a paid order |
 | POST | `/organizer/events/:id/orders/:orderId/cancel` 🔒 | — | `{order}`: cancels a free registration |
 | POST | `/support/cases` 🔒 | SupportCase input | 201 `{case}` |
-| GET | `/support/cases?status=` 🔒 | — | `{cases}`: cases the user may see, latest activity first, up to 100 |
+| GET | `/support/cases?status=&eventId=` 🔒 | — | `{cases}`: cases the user may see, latest activity first, up to 100 |
 | GET | `/support/cases/unread` 🔒 | — | `{unread}`: number of cases with activity the user has not seen |
 | GET | `/support/cases/:id` 🔒 | — | `{case, messages}`; marks the case read |
 | POST | `/support/cases/:id/messages` 🔒 | `{body}` | 201 `{case}` |
@@ -146,11 +147,12 @@ before the code, so a `validation_failed` response does not spend an attempt.
 name and contact email are required. Email verification is required before creating a profile.
 An account that is already an organizer or has a staff/admin role receives `role_conflict`.
 
-**Event input** (for POST and PUT): `{title, description, category, imageUrl?, venueName,
+**Event input** (for POST and PUT): `{title, description, category, imageUrl?, imageUrls?, venueName,
 venueAddress, timezone, visibility, capacity, startsAt, endsAt, registrationOpensAt?,
 registrationClosesAt?, refundPolicy?}`. All fields except those marked `?` are required; `description`
 and `refundPolicy` may be empty. `refundPolicy` is free text up to 2000 characters shown to buyers.
-`imageUrl` is an HTTP(S) URL or `null`. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
+`imageUrl` is the cover image, an HTTP(S) URL or `null`; `imageUrls` lists up to 10 more HTTP(S)
+image URLs for the event gallery (SRS 4.2) and defaults to `[]`. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
 registration close, when present, follows registration open and precedes the event start. Both PUT
 routes replace the complete editable resource rather than applying a partial patch. `capacity`
 cannot drop below the sum of the event's ticket type quantities (409 `capacity_exceeded`).
@@ -160,7 +162,7 @@ salesStartsAt?, salesEndsAt?, maxPerOrder, hidden, sortOrder}`. `name` is 1–10
 `description` up to 2000 and may be empty. `priceAmount` is 0–10,000,000, `quantity` is 1–1,000,000,
 `maxPerOrder` is 1–100, `sortOrder` is 0–10,000. Sales end, when both are set, follows sales start.
 The sum of all of an event's ticket type quantities may not exceed the event `capacity` (409
-`capacity_exceeded`). A price above 0 can be sold only after paid sales are activated for the event.
+`capacity_exceeded`). A price above 0 can be sold only while the event's paid sales are `active` (requested and approved).
 `quantity` cannot drop below the tickets issued or held for the type (409 `quantity_below_sold`), and
 a type with orders cannot be deleted (409 `ticket_type_in_use`).
 
@@ -179,9 +181,8 @@ event, the response is 404. Checks run in this order, each a 409:
 1. `payment_required`: the type has a price above 0. Paid types go through checkout.
 2. `registration_closed`: outside the type's sales window or the event's registration window, or the
    event has started.
-3. `ticket_limit_reached`: the account's tickets of this type would exceed `maxPerOrder`. The limit
-   counts all of the account's valid or used tickets and held quantities for the type, not only this
-   request.
+3. `ticket_limit_reached`: `quantity` is above the type's `maxPerOrder` (SRS 4.3: the limit applies
+   to one order; an account may place several orders).
 4. `sold_out`: fewer than `quantity` tickets of the type are left. Tickets held by pending orders
    count as taken until the hold ends.
 
@@ -199,16 +200,21 @@ All payments, activation fees and refunds are **simulations** (SRS 3.2, 4.6). No
 payment-related object carries `demo: true`, and clients must label these records as demo
 transactions.
 
-**PaidSales**: `{ status, feeAmount, demo, activatedAt, checklist: { paidTicketType, payoutAccount,
-contactPhone } }`. `status` is `inactive | active | suspended`. `feeAmount` is the one-time activation
+**PaidSales**: `{ status, feeAmount, demo, requestedAt, activatedAt, reviewNote, checklist: {
+paidTicketType, payoutAccount, contactPhone } }`. `status` is `inactive | pending | active | rejected |
+suspended`. `feeAmount` is the one-time activation
 fee in KZT, taken from the platform settings (default 10000) until activation and fixed after it. The checklist needs at least one ticket type with a price above 0, a
 `payoutAccountReference` on the organizer profile and a `contactPhone` (the demo stand-in for identity
 and payout verification).
 
-**Activation** (`POST .../paid-sales/activate`): `acceptTerms` must be `true` (400
-`validation_failed`). An incomplete checklist is 409 `activation_incomplete`; a platform suspension is
-409 `paid_sales_suspended`; a cancelled event is 409 `invalid_event_state`. Activating an already active
-event returns it unchanged. Activation applies to that event only and is recorded in the audit log.
+**Activation** (`POST .../paid-sales/activate`, SRS 3.2, 4.5, 2.3): `acceptTerms` must be `true` (400
+`validation_failed`). The system checks the checklist (409 `activation_incomplete` when incomplete),
+records the demo activation fee payment and accepted terms, and sets `status` to `pending`. A platform
+admin then approves (`active`) or rejects it with a `reviewNote` (`rejected`); paid checkout opens
+only when `active`. After a rejection the organizer fixes the issue and requests again, without
+paying the fee a second time. A platform suspension is 409 `paid_sales_suspended`; a cancelled event
+is 409 `invalid_event_state`. Requesting while `pending` or `active` returns the current state.
+Activation applies to that event only; requests and decisions are recorded in the audit log.
 
 **Checkout input**: `{items: [{ticketTypeId, quantity}], attendeeName, attendeeEmail?, promoCode?}`. 1–10 items,
 each ticket type once, quantity 1–100. `attendeeName` is 1–200 characters; `attendeeEmail` defaults to
@@ -401,6 +407,8 @@ messages cannot be edited or deleted.
 - `assigneeId` must be a platform admin, or for an `attendee` case a user of the event's organizer
   (400 `validation_failed` on `assigneeId` otherwise).
 - `status` filters the list (`?status=open`); any other value is 400 `validation_failed`.
+- `eventId` limits the list to cases linked to one event, so organizers can review the support
+  history of past and cancelled events (SRS 4.16).
 
 ## Organizer analytics, attendees and history
 
@@ -443,7 +451,7 @@ matches attendee or account name or email.
 action, type, entityType, entityId, description }`, oldest first, up to 1000 entries. `action` is
 `<type>.<verb>`, e.g. `event.published`; `description` is a short English summary. The `type`
 filter takes one of `event`, `ticket_type`, `paid_sales`, `payment`, `refund`, `registration`,
-`staff`, `campaign`, `check_in`, `support`, `report`, `dispute`. Recorded actions:
+`staff`, `campaign`, `check_in`, `support`, `report`, `dispute`, `payout`. Recorded actions:
 
 - `event.created`, `event.duplicated`, `event.updated` (with capacity changes), `event.published`,
   `event.unpublished`, `event.cancelled`
@@ -454,6 +462,8 @@ filter takes one of `event`, `ticket_type`, `paid_sales`, `payment`, `refund`, `
   `campaign.disabled`
 - `check_in.recorded`, `check_in.reversed`, `support.status_changed` and `support.assigned` (cases
   linked to the event)
+- `paid_sales.requested`, `paid_sales.approved`, `paid_sales.rejected`, `payout.scheduled`,
+  `payout.on_hold`, `payout.paid`
 - `event.suspended`, `event.restored`, `paid_sales.suspended`, `paid_sales.restored`,
   `report.dismissed`, `report.actioned`, `dispute.opened`, `dispute.refunded`, `dispute.rejected`
 
@@ -485,6 +495,8 @@ Organizer accounts are not promoted.
   suspended; restoring returns it to `published` (409 `invalid_event_state` otherwise). A suspended
   event disappears from public routes, cannot be sold, paid for or checked in, and stays readable and
   editable by its organizer, who can still cancel it.
+- `POST /admin/events/:id/paid-sales/approve` (`{note?}`) and `/reject` (`{note}`, required) → 204.
+  Reviews a `pending` activation request (409 `invalid_state` otherwise).
 - `POST /admin/events/:id/paid-sales/suspend` and `/restore` → 204. Suspends or restores the event's
   paid sales; buyers then get `paid_sales_inactive` and the organizer `paid_sales_suspended`
   (409 `invalid_state` when the activation is not in the required state).
@@ -501,7 +513,12 @@ Organizer accounts are not promoted.
 | GET | `/admin/refunds` | — | `{refunds}`: AdminRefund |
 | GET | `/admin/disputes` | `status` (`open`, `refunded`, `rejected`) | `{disputes}`: Dispute |
 | POST | `/admin/disputes/:disputeId/resolve` | `{decision, note}` | `{dispute}` |
-| GET | `/admin/paid-sales` | `status` (`active`, `suspended`) | `{paidSales}`: AdminActivation |
+| GET | `/admin/paid-sales` | `status` (`pending`, `active`, `suspended`, `rejected`) | `{paidSales}`: AdminActivation |
+| GET | `/admin/payouts` | `status` (`scheduled`, `on_hold`, `paid`) | `{payouts}`: Payout |
+| POST | `/admin/payouts/schedule` | — | `{payouts}`: payouts created by this run |
+| POST | `/admin/payouts/:payoutId/mark-paid` | — | `{payout}`: scheduled → paid |
+| POST | `/admin/payouts/:payoutId/hold` | — | `{payout}`: scheduled → on_hold |
+| POST | `/admin/payouts/:payoutId/release` | — | `{payout}`: on_hold → scheduled |
 | GET | `/admin/campaigns` | — | `{campaigns}`: every campaign with stats |
 | GET | `/admin/reports` | `status` (`open`, `dismissed`, `actioned`) | `{reports}`: EventReport |
 | POST | `/admin/reports/:reportId/resolve` | `{status}`: `dismissed` or `actioned` | `{report}` |
@@ -517,6 +534,16 @@ Escalated support cases are handled through `/support/cases`, where admins see e
 
 **AdminRefund**: `{ id, orderId, eventId, eventTitle, amount, status, reason, createdBy, demo,
 createdAt }` (`createdBy` is the refunding user's email).
+
+**Payouts** (SRS 4.10, 6): simulated organizer payouts; no money moves. `POST /admin/payouts/schedule`
+creates one payout per ended event (after `endsAt`) whose paid sales were activated and that has no
+payout yet. `amount` is gross minus refunds minus processing fees (never below 0) and
+`payoutAccountReference` is copied from the organizer profile. A payout starts `on_hold` when the
+event or its paid sales are suspended or a dispute is open, otherwise `scheduled`. Admins then mark it
+`paid` or move it between `scheduled` and `on_hold` (409 `invalid_state` for any other change). Every
+status change is in the event timeline (type `payout`). **Payout**: `{ id, eventId, eventTitle,
+organizerName, grossAmount, refundedAmount, feeAmount, amount, payoutAccountReference, status, demo,
+createdAt, paidAt }`.
 
 **AdminActivation**: `{ eventId, eventTitle, organizerName, status, feeAmount, demo, activatedAt,
 suspendedAt }`.

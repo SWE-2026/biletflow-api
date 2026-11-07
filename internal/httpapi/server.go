@@ -90,6 +90,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	organizer.POST("/profile", s.createOrganizer)
 	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
 	organizer.PUT("/profile", s.updateOrganizer, s.requireOrganizer)
+	organizer.GET("/payouts", s.listOrganizerPayouts, s.requireOrganizer)
 	s.organizerEventRoutes(organizer.Group("/events", s.requireOrganizer))
 }
 

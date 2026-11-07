@@ -12,6 +12,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+const maxEventImages = 10
+
 var eventIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func validImageURL(raw *string) bool {
@@ -41,6 +43,12 @@ func decodeEvent(c echo.Context) (store.EventInput, error) {
 		image := strings.TrimSpace(*in.ImageURL)
 		in.ImageURL = &image
 	}
+	if in.ImageURLs == nil {
+		in.ImageURLs = []string{}
+	}
+	for i := range in.ImageURLs {
+		in.ImageURLs[i] = strings.TrimSpace(in.ImageURLs[i])
+	}
 	return in, validateEvent(in)
 }
 
@@ -50,6 +58,10 @@ func validateEvent(in store.EventInput) error {
 	fe.check(len(in.Description) <= 10000, "description", "Use up to 10000 characters.")
 	fe.check(len(in.Category) > 0 && len(in.Category) <= 100, "category", "Enter a category (up to 100 characters).")
 	fe.check(validImageURL(in.ImageURL), "imageUrl", "Enter an http or https image URL.")
+	fe.check(len(in.ImageURLs) <= maxEventImages, "imageUrls", "Add up to 10 images.")
+	for _, image := range in.ImageURLs {
+		fe.check(validImageURL(&image), "imageUrls", "Enter http or https image URLs.")
+	}
 	fe.check(len(in.VenueName) > 0 && len(in.VenueName) <= 200, "venueName", "Enter a venue name (up to 200 characters).")
 	fe.check(len(in.VenueAddress) > 0 && len(in.VenueAddress) <= 500, "venueAddress", "Enter a venue address (up to 500 characters).")
 	_, zoneErr := time.LoadLocation(in.Timezone)

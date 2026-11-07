@@ -42,7 +42,7 @@ func (s *Server) activatePaidSales(c echo.Context) error {
 	if err := fe.err(); err != nil {
 		return err
 	}
-	ps, err := s.db.ActivatePaidSales(c.Request().Context(), organizerID(c), currentUser(c).ID, id)
+	ps, err := s.db.RequestPaidSales(c.Request().Context(), organizerID(c), currentUser(c).ID, id)
 	if err != nil {
 		return err
 	}

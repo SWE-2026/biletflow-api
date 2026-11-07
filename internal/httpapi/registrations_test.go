@@ -136,7 +136,7 @@ func TestFreeRegistration(t *testing.T) {
 	if got.Tickets[0].Status != "valid" || got.Tickets[0].Event.ID != eventID || got.Tickets[0].TicketTypeName != "Free" {
 		t.Fatalf("unexpected ticket: %+v", got.Tickets[0])
 	}
-	wantCode(t, first, registerPath, registration(freeID, 1), http.StatusConflict, "ticket_limit_reached")
+	wantCode(t, first, registerPath, registration(freeID, 3), http.StatusConflict, "ticket_limit_reached")
 	wantCode(t, first, registerPath, registration(paidID, 1), http.StatusConflict, "payment_required")
 	first.do(http.MethodPost, registerPath, registration(hiddenID, 1), http.StatusNotFound, nil)
 

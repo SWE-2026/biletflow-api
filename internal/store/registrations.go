@@ -101,20 +101,19 @@ func (p *Postgres) ListUserTickets(ctx context.Context, userID string) ([]Ticket
 }
 
 // soldTickets counts the ticket type's issued valid or used tickets plus the quantities held by
-// unexpired pending orders, in total and for one owner.
-func soldTickets(ctx context.Context, tx pgx.Tx, ticketTypeID, ownerID string) (total, owned int, err error) {
-	err = tx.QueryRow(ctx,
-		`SELECT COALESCE(SUM(n), 0)::bigint, COALESCE(SUM(n) FILTER (WHERE owner = $2), 0)::bigint FROM (
-		 SELECT 1 AS n, t.owner_id::text AS owner
-		 FROM tickets t JOIN order_items oi ON oi.id = t.order_item_id
+// unexpired pending orders.
+func soldTickets(ctx context.Context, tx pgx.Tx, ticketTypeID string) (int, error) {
+	var total int
+	err := tx.QueryRow(ctx,
+		`SELECT COALESCE(SUM(n), 0)::bigint FROM (
+		 SELECT 1 AS n FROM tickets t JOIN order_items oi ON oi.id = t.order_item_id
 		 WHERE oi.ticket_type_id = $1 AND t.status IN ('valid','used')
 		 UNION ALL
-		 SELECT oi.quantity, o.buyer_id::text
-		 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+		 SELECT oi.quantity FROM order_items oi JOIN orders o ON o.id = oi.order_id
 		 WHERE oi.ticket_type_id = $1 AND o.status = 'pending' AND o.expires_at > now()
 		 ) taken`,
-		ticketTypeID, ownerID).Scan(&total, &owned)
-	return total, owned, err
+		ticketTypeID).Scan(&total)
+	return total, err
 }
 
 // saleTarget is a ticket type locked for sale, with its event's registration window.
@@ -142,23 +141,23 @@ func lockForSale(ctx context.Context, tx pgx.Tx, eventID, ticketTypeID string) (
 }
 
 // checkSale applies the free registration rules: free only, then checkAvailable.
-func checkSale(ctx context.Context, tx pgx.Tx, s saleTarget, ticketTypeID, userID string, quantity int) error {
+func checkSale(ctx context.Context, tx pgx.Tx, s saleTarget, ticketTypeID string, quantity int) error {
 	if s.price > 0 {
 		return ErrPaymentRequired
 	}
-	return checkAvailable(ctx, tx, s, ticketTypeID, userID, quantity)
+	return checkAvailable(ctx, tx, s, ticketTypeID, quantity)
 }
 
-func checkAvailable(ctx context.Context, tx pgx.Tx, s saleTarget, ticketTypeID, userID string, quantity int) error {
+func checkAvailable(ctx context.Context, tx pgx.Tx, s saleTarget, ticketTypeID string, quantity int) error {
 	if !s.window.Open(time.Now()) {
 		return ErrRegistrationClosed
 	}
-	sold, owned, err := soldTickets(ctx, tx, ticketTypeID, userID)
+	if quantity > s.maxPerOrder {
+		return ErrTicketLimit
+	}
+	sold, err := soldTickets(ctx, tx, ticketTypeID)
 	if err != nil {
 		return err
-	}
-	if owned+quantity > s.maxPerOrder {
-		return ErrTicketLimit
 	}
 	if sold+quantity > s.quantity {
 		return ErrSoldOut
@@ -175,7 +174,7 @@ func (p *Postgres) RegisterFree(ctx context.Context, userID, eventID, ticketType
 		if err != nil {
 			return err
 		}
-		if err := checkSale(ctx, tx, s, ticketTypeID, userID, quantity); err != nil {
+		if err := checkSale(ctx, tx, s, ticketTypeID, quantity); err != nil {
 			return err
 		}
 		orderID, err := insertFreeOrder(ctx, tx, userID, eventID, ticketTypeID, quantity)

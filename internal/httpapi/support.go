@@ -86,12 +86,14 @@ func (s *Server) createSupportCase(c echo.Context) error {
 
 func (s *Server) listSupportCases(c echo.Context) error {
 	status := c.QueryParam("status")
+	eventFilter := strings.ToLower(c.QueryParam("eventId"))
 	fe := fieldErrors{}
 	fe.check(status == "" || slices.Contains(supportStatuses, status), "status", "Choose a valid status.")
+	fe.check(eventFilter == "" || eventIDPattern.MatchString(eventFilter), "eventId", "Choose an event.")
 	if err := fe.err(); err != nil {
 		return err
 	}
-	cases, err := s.db.ListSupportCases(c.Request().Context(), supportViewer(c), status)
+	cases, err := s.db.ListSupportCases(c.Request().Context(), supportViewer(c), status, eventFilter)
 	if err != nil {
 		return err
 	}

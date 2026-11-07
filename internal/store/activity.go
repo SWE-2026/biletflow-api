@@ -12,7 +12,7 @@ import (
 const maxActivityEntries = 1000
 
 var ActivityTypes = []string{"event", "ticket_type", "paid_sales", "payment", "refund", "registration",
-	"staff", "campaign", "check_in", "support", "report", "dispute"}
+	"staff", "campaign", "check_in", "support", "report", "dispute", "payout"}
 
 type ActivityEntry struct {
 	ID          string    `json:"id"`
@@ -86,6 +86,10 @@ var fixedDescriptions = map[string]string{
 	"event.restored":         "Event restored by the platform",
 	"paid_sales.suspended":   "Paid sales suspended by the platform",
 	"paid_sales.restored":    "Paid sales restored by the platform",
+	"payout.scheduled":       "Demo payout scheduled",
+	"payout.on_hold":         "Demo payout put on hold",
+	"payout.paid":            "Demo payout marked as paid",
+	"paid_sales.approved":    "Paid sales activation approved by the platform",
 	"report.dismissed":       "Event report dismissed",
 	"report.actioned":        "Event report actioned",
 	"dispute.refunded":       "Dispute resolved with a full demo refund",
@@ -107,6 +111,10 @@ func describeActivity(action string, d map[string]any) string {
 		return fmt.Sprintf("Ticket type %q deleted", d["name"])
 	case "paid_sales.activated":
 		return fmt.Sprintf("Paid sales activated (demo fee %v KZT)", d["feeAmount"])
+	case "paid_sales.requested":
+		return fmt.Sprintf("Paid sales activation requested (demo fee %v KZT paid)", d["feeAmount"])
+	case "paid_sales.rejected":
+		return fmt.Sprintf("Paid sales activation rejected: %v", d["note"])
 	case "payment.succeeded":
 		return fmt.Sprintf("Demo payment of %v KZT succeeded", d["amount"])
 	case "payment.failed":

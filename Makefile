@@ -1,7 +1,7 @@
 LOCAL_DB := postgres://biletflow:biletflow@localhost:5432/biletflow?sslmode=disable
 TEST_DB  := postgres://biletflow:biletflow@localhost:55433/biletflow_test?sslmode=disable
 
-.PHONY: run db-up db-down check test-unit test test-db-up test-db-down
+.PHONY: run db-up db-down check test-unit test test-db-up test-db-down backup restore
 
 ## run: start the API locally against `make db-up` (local mode: codes are returned as demoCode)
 run:
@@ -33,3 +33,13 @@ test-db-up:
 
 test-db-down:
 	docker compose --profile test rm -sf postgres-test
+
+## backup: dump the compose database to backups/biletflow-<timestamp>.dump (custom format)
+backup:
+	mkdir -p backups
+	docker compose exec -T postgres pg_dump -U biletflow -d biletflow -Fc > backups/biletflow-$$(date +%Y%m%d-%H%M%S).dump
+
+## restore: replace the compose database with a dump, e.g. `make restore FILE=backups/biletflow-20261107-120000.dump`
+restore:
+	@test -n "$(FILE)" || (echo "usage: make restore FILE=backups/<file>.dump" && exit 1)
+	docker compose exec -T postgres pg_restore -U biletflow -d biletflow --clean --if-exists --no-owner < "$(FILE)"
