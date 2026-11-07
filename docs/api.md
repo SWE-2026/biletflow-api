@@ -102,6 +102,13 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/events/:id/orders` 🔒 | — | `{orders}`: OrganizerOrder list, newest first |
 | POST | `/organizer/events/:id/orders/:orderId/refund` 🔒 | `{reason?}` | `{order}`: full **demo** refund of a paid order |
 | POST | `/organizer/events/:id/orders/:orderId/cancel` 🔒 | — | `{order}`: cancels a free registration |
+| POST | `/support/cases` 🔒 | SupportCase input | 201 `{case}` |
+| GET | `/support/cases?status=` 🔒 | — | `{cases}`: cases the user may see, latest activity first, up to 100 |
+| GET | `/support/cases/unread` 🔒 | — | `{unread}`: number of cases with activity the user has not seen |
+| GET | `/support/cases/:id` 🔒 | — | `{case, messages}`; marks the case read |
+| POST | `/support/cases/:id/messages` 🔒 | `{body}` | 201 `{case}` |
+| POST | `/support/cases/:id/status` 🔒 | `{status}` | `{case}`; handlers only |
+| POST | `/support/cases/:id/assign` 🔒 | `{assigneeId}` | `{case}`; handlers only, `null` unassigns |
 | GET | `/organizer/events/:id/campaigns` 🔒 | — | `{campaigns}`, newest first |
 | POST | `/organizer/events/:id/campaigns` 🔒 | Campaign input | 201 `{campaign}`: generates the code and link token |
 | PUT | `/organizer/events/:id/campaigns/:campaignId` 🔒 | Campaign input | `{campaign}`; full replacement |
@@ -338,3 +345,49 @@ that brings the total to 0 completes the order without payment. Redemptions coun
 pending orders with an active hold, and the limit is enforced while the campaign row is locked, so
 concurrent checkouts never exceed `maxRedemptions`. Refunded, cancelled and expired orders free their
 redemption. The processing fee applies to the discounted total.
+
+## Support cases
+
+SRS 4.13. Asynchronous threads; clients poll (no WebSocket). Notifications are in-app through
+`unread`; email notifications come with the email provider.
+
+**Kinds and access**
+
+- `attendee`: opened by any signed-in user about an event, order or ticket. Handled by the event's
+  organizer.
+- `organizer`: opened by an organizer about their account, activation, payments or a technical
+  problem, optionally about one of their events. Handled by platform admins.
+
+The requester always sees their own cases. Organizer users see the `attendee` cases of their events;
+platform admins (role `admin`) see every case. Anyone else gets 404. `viewerRole` is `requester` or
+`handler` for the current user. Only handlers change status or assignment (403 `forbidden`).
+
+**SupportCase input**: `{kind, category, subject, message, eventId?, orderId?, ticketId?}`.
+`subject` is 1–200 characters and `message` (the first message) 1–5000.
+
+| kind | categories | links |
+|---|---|---|
+| `attendee` | `ticket_delivery`, `payment`, `refund`, `seating`, `event_information`, `check_in`, `account`, `technical`, `other` | exactly one of `eventId`, `orderId`, `ticketId` |
+| `organizer` | `account`, `activation`, `payment`, `technical`, `other` | optional `eventId` only |
+
+The server fills in the context itself: a ticket brings its order and event, an order brings its
+event. The ticket or order must belong to the requester, and an event linked directly must be
+published or cancelled and public or unlisted; otherwise 404. An `organizer` case needs an organizer
+account (403 `forbidden`), and its `eventId` must be one of the organizer's events (404).
+
+**SupportCase**: `{ id, kind, category, subject, status, requesterId, requesterEmail, requesterName,
+eventId, eventTitle, orderId, ticketId, assigneeId, assigneeEmail, viewerRole, unread, createdAt,
+updatedAt, lastActivityAt }`. `status` is `open | in_progress | waiting_for_customer | resolved`.
+`unread` is true when someone else acted on the case after the current user last opened it.
+
+**SupportMessage**: `{ id, kind, authorId, authorName, authorRole, body, createdAt }`. `kind` is
+`message`, `status_change` (`body` is the new status) or `assignment` (`body` is the assignee's
+email, empty when unassigned). `authorRole` is `requester` or `handler`. The full history is kept;
+messages cannot be edited or deleted.
+
+**Rules**
+
+- A reply from the requester reopens a `waiting_for_customer` or `resolved` case as `open`.
+- `assigneeId` must be a platform admin, or for an `attendee` case a user of the event's organizer
+  (400 `validation_failed` on `assigneeId` otherwise).
+- `status` filters the list (`?status=open`); any other value is 400 `validation_failed`.

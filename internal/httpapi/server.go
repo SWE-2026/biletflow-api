@@ -80,11 +80,23 @@ func (s *Server) routes(v1 *echo.Group) {
 	staff.POST("/events/:id/tickets/:ticketId/check-in", s.checkInByID)
 	staff.POST("/events/:id/tickets/:ticketId/undo", s.undoCheckIn)
 
+	s.supportRoutes(v1.Group("/support", s.requireAuth))
+
 	organizer := v1.Group("/organizer", s.requireAuth)
 	organizer.POST("/profile", s.createOrganizer)
 	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
 	organizer.PUT("/profile", s.updateOrganizer, s.requireOrganizer)
 	s.organizerEventRoutes(organizer.Group("/events", s.requireOrganizer))
+}
+
+func (s *Server) supportRoutes(support *echo.Group) {
+	support.POST("/cases", s.createSupportCase)
+	support.GET("/cases", s.listSupportCases)
+	support.GET("/cases/unread", s.unreadSupportCases)
+	support.GET("/cases/:id", s.getSupportCase)
+	support.POST("/cases/:id/messages", s.postSupportMessage)
+	support.POST("/cases/:id/status", s.setSupportStatus)
+	support.POST("/cases/:id/assign", s.assignSupportCase)
 }
 
 func (s *Server) organizerEventRoutes(events *echo.Group) {

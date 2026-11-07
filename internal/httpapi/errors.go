@@ -56,6 +56,8 @@ var knownErrors = []struct {
 	{store.ErrOrderExpired, newError(http.StatusConflict, "order_expired", "Your ticket hold has expired. Start checkout again.")},
 	{store.ErrFreeOrder, newError(http.StatusConflict, "free_order", "Free registrations are cancelled, not refunded.")},
 	{store.ErrForbidden, errForbidden},
+	{store.ErrInvalidAssignee, &Error{Status: http.StatusBadRequest, Code: "validation_failed", Message: "Some fields are invalid.",
+		Fields: map[string]string{"assigneeId": "This person cannot handle this case."}}},
 	{store.ErrCampaignTicketTypes, &Error{Status: http.StatusBadRequest, Code: "validation_failed", Message: "Some fields are invalid.",
 		Fields: map[string]string{"ticketTypeIds": "Choose ticket types of this event."}}},
 	{store.ErrPromoNotFound, newError(http.StatusConflict, "promo_not_found", "This promo code does not exist for this event.")},
