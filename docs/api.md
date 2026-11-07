@@ -48,8 +48,10 @@ account number or payment credential. Creating a profile changes the current use
 `organizer`; the response includes the updated user so clients can replace their stored session user.
 
 **Event**: `{ id, organizerId, title, description, category, imageUrl, venueName, venueAddress,
-timezone, visibility, capacity, status, startsAt, endsAt, registrationOpensAt,
-registrationClosesAt, refundPolicy, createdAt, updatedAt }`. `visibility` is `public | unlisted | private` and
+timezone, visibility, capacity, status, phase, startsAt, endsAt, registrationOpensAt,
+registrationClosesAt, refundPolicy, createdAt, updatedAt }`. `phase` is computed on each read:
+`cancelled` for a cancelled event, otherwise `upcoming` before `startsAt`, `active` until `endsAt`
+and `completed` after. `visibility` is `public | unlisted | private` and
 `status` is `draft | published | cancelled`. Times are RFC 3339 values; the event's IANA `timezone`
 preserves its local scheduling context. A new event is always a draft.
 
@@ -86,7 +88,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
 | POST | `/organizer/events` 🔒 | Event input | 201 `{event}` in `draft` state |
-| GET | `/organizer/events` 🔒 | — | `{events}`: current organizer's events, all states |
+| GET | `/organizer/events?phase=` 🔒 | — | `{events}`: current organizer's events, all states; optional `phase` filter |
 | GET | `/organizer/events/:id` 🔒 | — | `{event}` owned by current organizer |
 | PUT | `/organizer/events/:id` 🔒 | Event input | `{event}`; full replacement, except cancelled events |
 | POST | `/organizer/events/:id/publish` 🔒 | — | `{event}`; draft → published |
@@ -114,6 +116,10 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | PUT | `/organizer/events/:id/campaigns/:campaignId` 🔒 | Campaign input | `{campaign}`; full replacement |
 | POST | `/organizer/events/:id/campaigns/:campaignId/enable` 🔒 | — | `{campaign}` |
 | POST | `/organizer/events/:id/campaigns/:campaignId/disable` 🔒 | — | `{campaign}` |
+| POST | `/organizer/events/:id/duplicate` 🔒 | — | 201 `{event}`: a new draft copied from the event |
+| GET | `/organizer/events/:id/analytics` 🔒 | — | `{analytics}`; filters `from`, `to`, `ticketTypeId` |
+| GET | `/organizer/events/:id/activity` 🔒 | — | `{activity}`: timeline; filters `from`, `to`, `type` |
+| GET | `/organizer/events/:id/attendees` 🔒 | — | `{tickets}`: StaffTicket list; filters `ticketTypeId`, `status`, `q` |
 | GET | `/organizer/events/:id/staff` 🔒 | — | `{staff}`: the event's assigned Event Admins |
 | POST | `/organizer/events/:id/staff` 🔒 | `{email, role}` | `{staffMember}`: assigns or changes a role |
 | DELETE | `/organizer/events/:id/staff/:userId` 🔒 | — | 204 |
@@ -391,3 +397,62 @@ messages cannot be edited or deleted.
 - `assigneeId` must be a platform admin, or for an `attendee` case a user of the event's organizer
   (400 `validation_failed` on `assigneeId` otherwise).
 - `status` filters the list (`?status=open`); any other value is 400 `validation_failed`.
+
+## Organizer analytics, attendees and history
+
+SRS 4.15 and 4.16. Owner organizer only; any other event is 404. Everything is computed from
+BiletFlow's own order, ticket, campaign, refund and check-in records, and money is demo money
+(`demo: true`). Completed and cancelled events keep all their data and stay readable through every
+organizer route.
+
+**Filters** (query parameters): `from` and `to` are RFC 3339 times (`to` exclusive and after `from`),
+`ticketTypeId` is one of the event's ticket types. An invalid value is 400 `validation_failed`.
+
+**Analytics** (`GET .../analytics`):
+
+```
+{ capacity, ticketsSold, ticketsReserved, ticketsRemaining, percentSold,
+  grossAmount, discountAmount, refundedAmount, netAmount, orders,
+  checkedIn, absent, checkInPercent, demo,
+  ticketTypes: [{ ticketTypeId, name, priceAmount, quantity, available, reserved, sold,
+                  refunded, cancelled, checkedIn, grossAmount }],
+  salesOverTime: [{ date, orders, tickets, grossAmount }],
+  campaigns: [Campaign] }
+```
+
+- Ticket counts are current totals and ignore `from`/`to`. `sold` counts valid and used tickets,
+  `reserved` the quantities held by pending orders, `available` is `quantity − sold − reserved`,
+  `checkedIn` counts used tickets and `absent` is `sold − checkedIn`. Percentages have one decimal.
+- `capacity` is the event capacity, or the type's `quantity` when `ticketTypeId` is set.
+  `ticketsRemaining` is `capacity − ticketsSold`.
+- Money covers paid and refunded orders whose payment time falls in `from`/`to`: `grossAmount` is
+  before discounts, `netAmount` is gross minus discounts minus refunds, and `orders` counts them.
+  Order-level money ignores `ticketTypeId`; per-type `grossAmount` and `salesOverTime` respect it.
+- `salesOverTime` groups by calendar day in the event's time zone (`date` is `YYYY-MM-DD`).
+- `campaigns` lists the event's campaigns with their all-time `stats`.
+
+**Attendees** (`GET .../attendees`): every ticket of the event (up to 5000) as StaffTicket, ordered
+by attendee name. `status` is `valid | used | cancelled | refunded`; `q` (up to 100 characters)
+matches attendee or account name or email.
+
+**Activity timeline** (`GET .../activity`): **ActivityEntry** `{ id, createdAt, actorId, actorName,
+action, type, entityType, entityId, description }`, oldest first, up to 1000 entries. `action` is
+`<type>.<verb>`, e.g. `event.published`; `description` is a short English summary. The `type`
+filter takes one of `event`, `ticket_type`, `paid_sales`, `payment`, `refund`, `registration`,
+`staff`, `campaign`, `check_in`, `support`. Recorded actions:
+
+- `event.created`, `event.duplicated`, `event.updated` (with capacity changes), `event.published`,
+  `event.unpublished`, `event.cancelled`
+- `ticket_type.created`, `ticket_type.updated` (with price and quantity changes), `ticket_type.deleted`
+- `paid_sales.activated`, `payment.succeeded`, `payment.failed`, `refund.succeeded`,
+  `registration.cancelled`
+- `staff.assigned`, `staff.removed`, `campaign.created`, `campaign.updated`, `campaign.enabled`,
+  `campaign.disabled`
+- `check_in.recorded`, `check_in.reversed`, `support.status_changed` (cases linked to the event)
+
+Entries are append-only; no route edits or deletes them.
+
+**Duplicate** (`POST .../duplicate`): creates a new `draft` owned by the same organizer with the
+event's details, capacity, refund policy and dates, and copies of its ticket types (sales windows
+cleared). Registration windows are cleared too. Orders, tickets, payments, check-ins, campaigns,
+staff and support cases are not copied. Works for events in any state.

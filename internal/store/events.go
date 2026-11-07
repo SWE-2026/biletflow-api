@@ -23,6 +23,7 @@ type Event struct {
 	Visibility           string     `json:"visibility"`
 	Capacity             int        `json:"capacity"`
 	Status               string     `json:"status"`
+	Phase                string     `json:"phase"`
 	StartsAt             time.Time  `json:"startsAt"`
 	EndsAt               time.Time  `json:"endsAt"`
 	RegistrationOpensAt  *time.Time `json:"registrationOpensAt"`
@@ -59,11 +60,38 @@ func scanEvent(row pgx.Row) (Event, error) {
 		&e.VenueName, &e.VenueAddress, &e.Timezone, &e.Visibility, &e.Capacity, &e.Status,
 		&e.StartsAt, &e.EndsAt, &e.RegistrationOpensAt, &e.RegistrationClosesAt,
 		&e.RefundPolicy, &e.CreatedAt, &e.UpdatedAt)
+	e.Phase = eventPhase(e, time.Now())
 	return e, notFound(err)
 }
 
-func (p *Postgres) CreateEvent(ctx context.Context, organizerID string, in EventInput) (Event, error) {
-	return scanEvent(p.pool.QueryRow(ctx,
+func eventPhase(e Event, now time.Time) string {
+	switch {
+	case e.Status == "cancelled":
+		return "cancelled"
+	case now.Before(e.StartsAt):
+		return "upcoming"
+	case now.Before(e.EndsAt):
+		return "active"
+	default:
+		return "completed"
+	}
+}
+
+func (p *Postgres) CreateEvent(ctx context.Context, organizerID, actorID string, in EventInput) (Event, error) {
+	var e Event
+	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
+		var err error
+		if e, err = insertEvent(ctx, tx, organizerID, in); err != nil {
+			return err
+		}
+		return writeAudit(ctx, tx, auditEntry{eventID: e.ID, actorID: actorID, action: "event.created",
+			entityType: "event", entityID: e.ID, details: map[string]any{"title": e.Title}})
+	})
+	return e, err
+}
+
+func insertEvent(ctx context.Context, tx pgx.Tx, organizerID string, in EventInput) (Event, error) {
+	return scanEvent(tx.QueryRow(ctx,
 		`INSERT INTO events (organizer_id, title, description, category, image_url, venue_name,
 		 venue_address, timezone, visibility, capacity, starts_at, ends_at,
 		 registration_opens_at, registration_closes_at, refund_policy)
@@ -105,13 +133,24 @@ func (p *Postgres) PublicEvent(ctx context.Context, id string) (Event, error) {
 
 // UpdateEvent replaces the event's editable fields. Capacity cannot drop below the event's total
 // ticket type quantity.
-func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, id string, in EventInput) (Event, error) {
+func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, actorID, id string, in EventInput) (Event, error) {
 	var e Event
 	err := p.withEditableEvent(ctx, organizerID, id, func(tx pgx.Tx) error {
 		if err := checkCapacity(ctx, tx, id, "", in.Capacity, 0); err != nil {
 			return err
 		}
-		var err error
+		before, err := eventCapacity(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		details := map[string]any{}
+		if before != in.Capacity {
+			details["capacity"] = []int{before, in.Capacity}
+		}
+		if err := writeAudit(ctx, tx, auditEntry{eventID: id, actorID: actorID, action: "event.updated",
+			entityType: "event", entityID: id, details: details}); err != nil {
+			return err
+		}
 		e, err = scanEvent(tx.QueryRow(ctx,
 			`UPDATE events SET title=$2, description=$3, category=$4, image_url=$5, venue_name=$6,
 			 venue_address=$7, timezone=$8, visibility=$9, capacity=$10, starts_at=$11, ends_at=$12,
@@ -125,19 +164,32 @@ func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, id string, in E
 	return e, err
 }
 
-func (p *Postgres) TransitionEvent(ctx context.Context, organizerID, id, from, to string) (Event, error) {
-	e, err := scanEvent(p.pool.QueryRow(ctx,
-		`UPDATE events SET status=$4, updated_at=now()
-		 WHERE id=$1 AND organizer_id=$2 AND status=$3 RETURNING `+eventColumns,
-		id, organizerID, from, to))
-	return e, p.eventMutationError(ctx, organizerID, id, err)
+func (p *Postgres) TransitionEvent(ctx context.Context, organizerID, actorID, id, from, to string) (Event, error) {
+	action := "event.published"
+	if to == "draft" {
+		action = "event.unpublished"
+	}
+	return p.changeEventStatus(ctx, organizerID, actorID, id, []string{from}, to, action)
 }
 
-func (p *Postgres) CancelEvent(ctx context.Context, organizerID, id string) (Event, error) {
-	e, err := scanEvent(p.pool.QueryRow(ctx,
-		`UPDATE events SET status='cancelled', updated_at=now()
-		 WHERE id=$1 AND organizer_id=$2 AND status IN ('draft','published') RETURNING `+eventColumns,
-		id, organizerID))
+func (p *Postgres) CancelEvent(ctx context.Context, organizerID, actorID, id string) (Event, error) {
+	return p.changeEventStatus(ctx, organizerID, actorID, id, []string{"draft", "published"}, "cancelled", "event.cancelled")
+}
+
+func (p *Postgres) changeEventStatus(ctx context.Context, organizerID, actorID, id string, from []string, to, action string) (Event, error) {
+	var e Event
+	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
+		var err error
+		e, err = scanEvent(tx.QueryRow(ctx,
+			`UPDATE events SET status=$4, updated_at=now()
+			 WHERE id=$1 AND organizer_id=$2 AND status = ANY($3::text[]) RETURNING `+eventColumns,
+			id, organizerID, from, to))
+		if err != nil {
+			return err
+		}
+		return writeAudit(ctx, tx, auditEntry{eventID: id, actorID: actorID, action: action,
+			entityType: "event", entityID: id, details: map[string]any{"status": to}})
+	})
 	return e, p.eventMutationError(ctx, organizerID, id, err)
 }
 

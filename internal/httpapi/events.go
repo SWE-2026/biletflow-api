@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,18 +77,27 @@ func (s *Server) createEvent(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	e, err := s.db.CreateEvent(c.Request().Context(), organizerID(c), in)
+	e, err := s.db.CreateEvent(c.Request().Context(), organizerID(c), currentUser(c).ID, in)
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"event": e})
 }
 
+var eventPhases = []string{"upcoming", "active", "completed", "cancelled"}
+
 func (s *Server) listOrganizerEvents(c echo.Context) error {
+	phase := c.QueryParam("phase")
+	fe := fieldErrors{}
+	fe.check(phase == "" || slices.Contains(eventPhases, phase), "phase", "Choose upcoming, active, completed or cancelled.")
+	if err := fe.err(); err != nil {
+		return err
+	}
 	events, err := s.db.ListOrganizerEvents(c.Request().Context(), organizerID(c))
 	if err != nil {
 		return err
 	}
+	events = slices.DeleteFunc(events, func(e store.Event) bool { return phase != "" && e.Phase != phase })
 	if events == nil {
 		events = []store.Event{}
 	}
@@ -115,7 +125,7 @@ func (s *Server) updateEvent(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	e, err := s.db.UpdateEvent(c.Request().Context(), organizerID(c), id, in)
+	e, err := s.db.UpdateEvent(c.Request().Context(), organizerID(c), currentUser(c).ID, id, in)
 	if err != nil {
 		return err
 	}
@@ -135,7 +145,7 @@ func (s *Server) transitionEvent(c echo.Context, from, to string) error {
 	if err != nil {
 		return err
 	}
-	e, err := s.db.TransitionEvent(c.Request().Context(), organizerID(c), id, from, to)
+	e, err := s.db.TransitionEvent(c.Request().Context(), organizerID(c), currentUser(c).ID, id, from, to)
 	if err != nil {
 		return err
 	}
@@ -147,7 +157,7 @@ func (s *Server) cancelEvent(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	e, err := s.db.CancelEvent(c.Request().Context(), organizerID(c), id)
+	e, err := s.db.CancelEvent(c.Request().Context(), organizerID(c), currentUser(c).ID, id)
 	if err != nil {
 		return err
 	}

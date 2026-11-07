@@ -113,7 +113,7 @@ func (p *Postgres) ListVisibleTicketTypes(ctx context.Context, eventID string) (
 		 ORDER BY sort_order, created_at, id`, eventID))
 }
 
-func (p *Postgres) CreateTicketType(ctx context.Context, organizerID, eventID string, in TicketTypeInput) (TicketType, error) {
+func (p *Postgres) CreateTicketType(ctx context.Context, organizerID, actorID, eventID string, in TicketTypeInput) (TicketType, error) {
 	var t TicketType
 	err := p.withEditableEvent(ctx, organizerID, eventID, func(tx pgx.Tx) error {
 		capacity, err := eventCapacity(ctx, tx, eventID)
@@ -129,12 +129,34 @@ func (p *Postgres) CreateTicketType(ctx context.Context, organizerID, eventID st
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+ticketTypeColumns,
 			eventID, in.Name, in.Description, in.PriceAmount, in.Quantity,
 			in.SalesStartsAt, in.SalesEndsAt, in.MaxPerOrder, in.Hidden, in.SortOrder))
-		return err
+		if err != nil {
+			return err
+		}
+		return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "ticket_type.created",
+			entityType: "ticket_type", entityID: t.ID,
+			details: map[string]any{"name": t.Name, "priceAmount": t.PriceAmount, "quantity": t.Quantity}})
 	})
 	return t, err
 }
 
-func (p *Postgres) UpdateTicketType(ctx context.Context, organizerID, eventID, id string, in TicketTypeInput) (TicketType, error) {
+func ticketTypeChanges(ctx context.Context, tx pgx.Tx, id string, in TicketTypeInput) (map[string]any, error) {
+	var price int64
+	var quantity int
+	if err := tx.QueryRow(ctx, `SELECT price_amount, quantity FROM ticket_types WHERE id=$1`, id).
+		Scan(&price, &quantity); err != nil {
+		return nil, notFound(err)
+	}
+	details := map[string]any{"name": in.Name}
+	if price != in.PriceAmount {
+		details["priceAmount"] = []int64{price, in.PriceAmount}
+	}
+	if quantity != in.Quantity {
+		details["quantity"] = []int{quantity, in.Quantity}
+	}
+	return details, nil
+}
+
+func (p *Postgres) UpdateTicketType(ctx context.Context, organizerID, actorID, eventID, id string, in TicketTypeInput) (TicketType, error) {
 	var t TicketType
 	err := p.withEditableEvent(ctx, organizerID, eventID, func(tx pgx.Tx) error {
 		capacity, err := eventCapacity(ctx, tx, eventID)
@@ -145,6 +167,14 @@ func (p *Postgres) UpdateTicketType(ctx context.Context, organizerID, eventID, i
 			return err
 		}
 		if err := checkNotBelowSold(ctx, tx, eventID, id, in.Quantity); err != nil {
+			return err
+		}
+		details, err := ticketTypeChanges(ctx, tx, id, in)
+		if err != nil {
+			return err
+		}
+		if err := writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "ticket_type.updated",
+			entityType: "ticket_type", entityID: id, details: details}); err != nil {
 			return err
 		}
 		t, err = scanTicketType(tx.QueryRow(ctx,
@@ -178,7 +208,7 @@ func checkNotBelowSold(ctx context.Context, tx pgx.Tx, eventID, id string, quant
 	return nil
 }
 
-func (p *Postgres) DeleteTicketType(ctx context.Context, organizerID, eventID, id string) error {
+func (p *Postgres) DeleteTicketType(ctx context.Context, organizerID, actorID, eventID, id string) error {
 	return p.withEditableEvent(ctx, organizerID, eventID, func(tx pgx.Tx) error {
 		var ordered bool
 		if err := tx.QueryRow(ctx,
@@ -188,10 +218,12 @@ func (p *Postgres) DeleteTicketType(ctx context.Context, organizerID, eventID, i
 		if ordered {
 			return ErrTicketTypeInUse
 		}
-		tag, err := tx.Exec(ctx, `DELETE FROM ticket_types WHERE id=$1 AND event_id=$2`, id, eventID)
-		if err == nil && tag.RowsAffected() == 0 {
-			return ErrNotFound
+		var name string
+		err := tx.QueryRow(ctx, `DELETE FROM ticket_types WHERE id=$1 AND event_id=$2 RETURNING name`, id, eventID).Scan(&name)
+		if err != nil {
+			return notFound(err)
 		}
-		return err
+		return writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: actorID, action: "ticket_type.deleted",
+			entityType: "ticket_type", entityID: id, details: map[string]any{"name": name}})
 	})
 }

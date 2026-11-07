@@ -153,6 +153,10 @@ func (p *Postgres) checkIn(ctx context.Context, userID, eventID, match, value st
 				ticketID, userID); err != nil {
 				return err
 			}
+			if err := writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: userID, action: "check_in.recorded",
+				entityType: "ticket", entityID: ticketID, details: map[string]any{}}); err != nil {
+				return err
+			}
 		case !errors.Is(err, pgx.ErrNoRows):
 			return err
 		}
@@ -228,4 +232,28 @@ func (p *Postgres) UndoCheckIn(ctx context.Context, userID, eventID, ticketID st
 		return err
 	})
 	return ticket, err
+}
+
+const maxAttendeeList = 5000
+
+type AttendeeFilter struct {
+	TicketTypeID string
+	Status       string
+	Query        string
+}
+
+func (p *Postgres) ListEventAttendees(ctx context.Context, organizerID, eventID string, f AttendeeFilter) ([]StaffTicket, error) {
+	if _, err := p.EventByOwner(ctx, organizerID, eventID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, staffTicketSelect+`
+		 AND ($2 = '' OR tt.id::text = $2) AND ($3 = '' OR t.status = $3)
+		 AND ($4 = '' OR o.attendee_name ILIKE $5 OR o.attendee_email ILIKE $5
+		 OR u.display_name ILIKE $5 OR u.email ILIKE $5)
+		 ORDER BY 4, t.id LIMIT $6`,
+		eventID, f.TicketTypeID, f.Status, f.Query, likePattern(f.Query), maxAttendeeList)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (StaffTicket, error) { return scanStaffTicket(row) })
 }

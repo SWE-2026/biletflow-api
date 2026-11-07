@@ -108,15 +108,16 @@ type lockedCase struct {
 	organizerID string
 	status      string
 	role        string
+	eventID     *string
 }
 
 func lockCase(ctx context.Context, tx pgx.Tx, v SupportViewer, caseID string) (lockedCase, error) {
 	var lc lockedCase
 	err := tx.QueryRow(ctx,
 		`SELECT c.kind, c.organizer_id::text, c.status,
-		 CASE WHEN c.requester_id = $1 THEN 'requester' ELSE 'handler' END
+		 CASE WHEN c.requester_id = $1 THEN 'requester' ELSE 'handler' END, c.event_id::text
 		 FROM support_cases c WHERE c.id = $4 AND `+caseAccess+` FOR UPDATE`,
-		append(v.args(), caseID)...).Scan(&lc.kind, &lc.organizerID, &lc.status, &lc.role)
+		append(v.args(), caseID)...).Scan(&lc.kind, &lc.organizerID, &lc.status, &lc.role, &lc.eventID)
 	return lc, notFound(err)
 }
 
@@ -149,6 +150,12 @@ func (p *Postgres) SetSupportStatus(ctx context.Context, v SupportViewer, caseID
 		}
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "status_change", status); err != nil {
 			return err
+		}
+		if lc.eventID != nil {
+			if err := writeAudit(ctx, tx, auditEntry{eventID: *lc.eventID, actorID: v.UserID, action: "support.status_changed",
+				entityType: "support_case", entityID: caseID, details: map[string]any{"status": status}}); err != nil {
+				return err
+			}
 		}
 		return touchCase(ctx, tx, caseID, v.UserID, status)
 	})

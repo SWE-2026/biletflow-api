@@ -70,7 +70,7 @@ func (s *Server) createTicketType(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	t, err := s.db.CreateTicketType(c.Request().Context(), organizerID(c), id, in)
+	t, err := s.db.CreateTicketType(c.Request().Context(), organizerID(c), currentUser(c).ID, id, in)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (s *Server) updateTicketType(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	t, err := s.db.UpdateTicketType(c.Request().Context(), organizerID(c), id, typeID, in)
+	t, err := s.db.UpdateTicketType(c.Request().Context(), organizerID(c), currentUser(c).ID, id, typeID, in)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (s *Server) deleteTicketType(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.db.DeleteTicketType(c.Request().Context(), organizerID(c), id, typeID); err != nil {
+	if err := s.db.DeleteTicketType(c.Request().Context(), organizerID(c), currentUser(c).ID, id, typeID); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
