@@ -88,7 +88,7 @@ func (p *Postgres) CancelRegistration(ctx context.Context, organizerID, actorID,
 		if err := invalidateTickets(ctx, tx, orderID, "cancelled"); err != nil {
 			return err
 		}
-		if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "registration_cancelled", link: "/me/orders/" + orderID,
+		if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "registration_cancelled", link: orderLink(orderID),
 			title: "Registration cancelled",
 			body:  "The organizer cancelled your free registration. Its tickets are no longer valid."}); err != nil {
 			return err
@@ -121,7 +121,7 @@ func refundPaidOrder(ctx context.Context, tx pgx.Tx, actorID, eventID, orderID, 
 	if err := invalidateTickets(ctx, tx, orderID, "refunded"); err != nil {
 		return err
 	}
-	if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "refund_completed", link: "/me/orders/" + orderID,
+	if err := notifyOrderBuyer(ctx, tx, orderID, notice{kind: "refund_completed", link: orderLink(orderID),
 		title: "Refund completed",
 		body: fmt.Sprintf("Your order was fully refunded (%d KZT, demo refund; no real money moved). "+
 			"Its tickets are no longer valid.", total)}); err != nil {

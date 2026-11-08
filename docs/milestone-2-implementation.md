@@ -47,8 +47,9 @@ database already used it. The same suite ran on a temporary PostgreSQL 17 contai
 
 - **Seating:** the schema has no seat maps. The web app still has `Seat Selection` and
   `Seating Layout` routes. Either build seating or drop both routes.
-- **Notification links:** `Notification.link` uses `/me/orders/<id>`, but the web app's routes are
-  `/account/orders/:orderId`. One side has to change before the notifications screen ships.
+- **Seating is a bonus feature** (SRS 12, 13.4) and is deferred until the required web screens are done.
+- **Notification links (fixed):** links now point to the web app's real routes, chosen per
+  recipient (`internal/store/weblinks.go`), and a test checks them.
 - **Clients:** most of the matching web screens are still placeholders: My Orders, support,
   notifications, organizer event tabs and the admin portal. The mobile scanner already uses the
   check-in API.

@@ -88,8 +88,8 @@ func (p *Postgres) CreateSupportCase(ctx context.Context, v SupportViewer, in Su
 		if err := insertSupportMessage(ctx, tx, id, v.UserID, "message", in.Message); err != nil {
 			return err
 		}
-		if err := notifyCaseHandlers(ctx, tx, lockedCase{kind: in.Kind, organizerID: cc.organizerID, eventID: cc.eventID},
-			notice{kind: "support_message", link: "/support/cases/" + id,
+		if err := notifyCaseHandlers(ctx, tx, lockedCase{kind: in.Kind, organizerID: cc.organizerID, eventID: cc.eventID}, id,
+			notice{kind: "support_message",
 				title: "New support case: " + in.Subject, body: "A new support case was opened. Open it to reply."}); err != nil {
 			return err
 		}
@@ -126,15 +126,38 @@ func (lc lockedCase) event() string {
 	return *lc.eventID
 }
 
-func notifyCaseHandlers(ctx context.Context, tx pgx.Tx, lc lockedCase, n notice) error {
+// notifyCaseHandlers tells whoever handles the case, with a link to the page they open it on.
+func notifyCaseHandlers(ctx context.Context, tx pgx.Tx, lc lockedCase, caseID string, n notice) error {
 	switch {
 	case lc.assigneeID != nil:
-		return notifyUser(ctx, tx, *lc.assigneeID, lc.event(), n)
+		return notifyAssignee(ctx, tx, lc, caseID, *lc.assigneeID, n)
 	case lc.kind == "attendee":
+		n.link = supportLink(lc, caseID, supportOrganizer)
 		return notifyOrganizer(ctx, tx, lc.organizerID, lc.event(), n)
 	default:
+		n.link = supportLink(lc, caseID, supportAdmin)
 		return notifyAdmins(ctx, tx, n)
 	}
+}
+
+// notifyAssignee links an admin assignee to the admin portal and an organizer user to the event.
+func notifyAssignee(ctx context.Context, tx pgx.Tx, lc lockedCase, caseID, assigneeID string, n notice) error {
+	var isAdmin bool
+	if err := tx.QueryRow(ctx, `SELECT role = 'admin' FROM users WHERE id = $1`, assigneeID).Scan(&isAdmin); err != nil {
+		return err
+	}
+	side := supportOrganizer
+	if isAdmin {
+		side = supportAdmin
+	}
+	n.link = supportLink(lc, caseID, side)
+	return notifyUser(ctx, tx, assigneeID, lc.event(), n)
+}
+
+// notifyRequester tells the person who opened the case.
+func notifyRequester(ctx context.Context, tx pgx.Tx, lc lockedCase, caseID string, n notice) error {
+	n.link = supportLink(lc, caseID, supportRequester)
+	return notifyUser(ctx, tx, lc.requesterID, lc.event(), n)
 }
 
 func lockCase(ctx context.Context, tx pgx.Tx, v SupportViewer, caseID string) (lockedCase, error) {
@@ -167,11 +190,13 @@ func (p *Postgres) AddSupportMessage(ctx context.Context, v SupportViewer, caseI
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "message", body); err != nil {
 			return err
 		}
-		n := notice{kind: "support_message", link: "/support/cases/" + caseID,
+		n := notice{kind: "support_message",
 			title: "New support message", body: "There is a new reply in a support case. Open the case to read it."}
-		notify := notifyCaseHandlers(ctx, tx, lc, n)
+		var notify error
 		if lc.role == "handler" {
-			notify = notifyUser(ctx, tx, lc.requesterID, lc.event(), n)
+			notify = notifyRequester(ctx, tx, lc, caseID, n)
+		} else {
+			notify = notifyCaseHandlers(ctx, tx, lc, caseID, n)
 		}
 		if notify != nil {
 			return notify
@@ -188,7 +213,7 @@ func (p *Postgres) SetSupportStatus(ctx context.Context, v SupportViewer, caseID
 		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "status_change", status); err != nil {
 			return err
 		}
-		if err := notifyUser(ctx, tx, lc.requesterID, lc.event(), notice{kind: "support_status", link: "/support/cases/" + caseID,
+		if err := notifyRequester(ctx, tx, lc, caseID, notice{kind: "support_status",
 			title: "Support case " + strings.ReplaceAll(status, "_", " "),
 			body:  "The status of your support case changed to " + strings.ReplaceAll(status, "_", " ") + "."}); err != nil {
 			return err
@@ -234,7 +259,7 @@ func (p *Postgres) AssignSupportCase(ctx context.Context, v SupportViewer, caseI
 			return err
 		}
 		if assigneeID != nil {
-			if err := notifyUser(ctx, tx, *assigneeID, lc.event(), notice{kind: "support_assigned", link: "/support/cases/" + caseID,
+			if err := notifyAssignee(ctx, tx, lc, caseID, *assigneeID, notice{kind: "support_assigned",
 				title: "Support case assigned to you", body: "A support case was assigned to you. Open it to reply."}); err != nil {
 				return err
 			}

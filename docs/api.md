@@ -607,7 +607,19 @@ attendee email or the user's account email. Emails go out from a background queu
 are emailed directly by the auth endpoints.
 
 **Notification**: `{ id, kind, title, body, link, orderId, eventId, read, createdAt }`. `link` is a
-web-app path such as `/me/orders/<id>`. Kinds:
+path in the web app (emails add `PUBLIC_WEB_URL` in front), chosen for the recipient:
+
+| link | for |
+|---|---|
+| `/account/orders/<orderId>` | order, payment, ticket, cancellation and refund notifications |
+| `/events/<eventId>` | `event_updated`, `event_cancelled` |
+| `/organizer/profile` | `payout_status` |
+| `/account/support/<caseId>` | the attendee who opened a case |
+| `/organizer/support/<caseId>` | the organizer who opened a platform case |
+| `/organizer/events/<eventId>/support/<caseId>` | the organizer team handling an attendee case |
+| `/admin/support/<caseId>` | platform admins |
+
+Kinds:
 
 | kind | sent to | when |
 |---|---|---|

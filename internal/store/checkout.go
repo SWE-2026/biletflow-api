@@ -267,7 +267,7 @@ func (p *Postgres) CancelPendingOrder(ctx context.Context, userID, orderID strin
 
 func completePayment(ctx context.Context, tx pgx.Tx, orderID, userID string, succeed bool) error {
 	if !succeed {
-		return notifyOrderBuyer(ctx, tx, orderID, notice{kind: "payment_failed", link: "/me/orders/" + orderID,
+		return notifyOrderBuyer(ctx, tx, orderID, notice{kind: "payment_failed", link: orderLink(orderID),
 			title: "Payment failed",
 			body: "Your demo payment did not go through, so no tickets were issued. Your tickets stay reserved " +
 				"until the hold ends; you can try again from your order."})

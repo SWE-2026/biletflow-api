@@ -154,7 +154,7 @@ func (p *Postgres) UpdateEvent(ctx context.Context, organizerID, actorID, id str
 			return err
 		}
 		if attendeeFacingChange(before, in) {
-			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_updated", link: "/events/" + id,
+			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_updated", link: eventLink(id),
 				title: "Event updated: " + in.Title,
 				body:  "The organizer changed the date, time or venue of " + in.Title + ". Check the event page for the new details; your tickets stay valid."}); err != nil {
 				return err
@@ -203,7 +203,7 @@ func (p *Postgres) changeEventStatus(ctx context.Context, organizerID, actorID, 
 			return err
 		}
 		if to == "cancelled" {
-			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_cancelled", link: "/events/" + id,
+			if err := notifyTicketHolders(ctx, tx, id, notice{kind: "event_cancelled", link: eventLink(id),
 				title: "Event cancelled: " + e.Title,
 				body:  e.Title + " has been cancelled by the organizer. Check your order for refund details or open a support case."}); err != nil {
 				return err

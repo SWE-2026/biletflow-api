@@ -51,7 +51,7 @@ func notifyOrderIssued(ctx context.Context, tx pgx.Tx, orderID string) error {
 		orderID).Scan(&title, &total); err != nil {
 		return err
 	}
-	link := "/me/orders/" + orderID
+	link := orderLink(orderID)
 	confirm := notice{kind: KindOrderConfirmed, link: link,
 		title: "Registration confirmed: " + title,
 		body:  "Your registration for " + title + " is confirmed. No payment was needed."}

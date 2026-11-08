@@ -68,7 +68,7 @@ var payoutMessages = map[string]string{
 }
 
 func notifyPayout(ctx context.Context, tx pgx.Tx, sp scheduledPayout) error {
-	return notifyOrganizer(ctx, tx, sp.organizerID, sp.eventID, notice{kind: "payout_status", link: "/organizer/payouts",
+	return notifyOrganizer(ctx, tx, sp.organizerID, sp.eventID, notice{kind: "payout_status", link: payoutsLink,
 		title: "Payout status: " + strings.ReplaceAll(sp.status, "_", " "),
 		body:  "Your demo payout for this event " + payoutMessages[sp.status] + ". Payouts are simulated; no real money moves."})
 }

@@ -67,7 +67,7 @@ func scanCampaign(row pgx.Row) (Campaign, error) {
 		&c.StartsAt, &c.EndsAt, &c.MaxRedemptions, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.TicketTypeIDs,
 		&c.Stats.Redemptions, &c.Stats.TicketsSold, &c.Stats.GrossAmount, &c.Stats.DiscountAmount)
 	c.Stats.NetAmount = c.Stats.GrossAmount - c.Stats.DiscountAmount
-	c.LinkPath = "/events/" + c.EventID + "?campaign=" + c.Token
+	c.LinkPath = eventLink(c.EventID) + "?campaign=" + c.Token
 	return c, notFound(err)
 }
 
