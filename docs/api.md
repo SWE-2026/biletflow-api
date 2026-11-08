@@ -555,8 +555,10 @@ status change is in the event timeline (type `payout`). **Payout**: `{ id, event
 organizerName, grossAmount, refundedAmount, feeAmount, amount, payoutAccountReference, status, demo,
 createdAt, paidAt }`.
 
-**AdminActivation**: `{ eventId, eventTitle, organizerName, status, feeAmount, demo, activatedAt,
-suspendedAt }`.
+**AdminActivation**: `{ eventId, eventTitle, organizerName, contactEmail, contactPhone,
+payoutAccountReference, status, feeAmount, demo, requestedAt, activatedAt, suspendedAt, reviewNote }`,
+newest request first. The organizer's contact details and demo payout label are what an admin checks
+before approving; `reviewNote` is the last approve or reject note.
 
 **Settings**: `{ activationFeeAmount, processingFeePercent, updatedAt }`. The fee is 0–10,000,000 KZT
 and the percentage 0–20. New values apply to activations and orders created afterwards.

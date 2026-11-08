@@ -49,15 +49,21 @@ type AdminRefund struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+// AdminActivation is a paid sales request with what an admin needs to review it.
 type AdminActivation struct {
-	EventID       string     `json:"eventId"`
-	EventTitle    string     `json:"eventTitle"`
-	OrganizerName string     `json:"organizerName"`
-	Status        string     `json:"status"`
-	FeeAmount     int64      `json:"feeAmount"`
-	Demo          bool       `json:"demo"`
-	ActivatedAt   *time.Time `json:"activatedAt"`
-	SuspendedAt   *time.Time `json:"suspendedAt"`
+	EventID                string     `json:"eventId"`
+	EventTitle             string     `json:"eventTitle"`
+	OrganizerName          string     `json:"organizerName"`
+	ContactEmail           string     `json:"contactEmail"`
+	ContactPhone           string     `json:"contactPhone"`
+	PayoutAccountReference string     `json:"payoutAccountReference"`
+	Status                 string     `json:"status"`
+	FeeAmount              int64      `json:"feeAmount"`
+	Demo                   bool       `json:"demo"`
+	RequestedAt            *time.Time `json:"requestedAt"`
+	ActivatedAt            *time.Time `json:"activatedAt"`
+	SuspendedAt            *time.Time `json:"suspendedAt"`
+	ReviewNote             string     `json:"reviewNote"`
 }
 
 func limitClause(limit int) string { return " LIMIT " + strconv.Itoa(limit) }
@@ -141,16 +147,19 @@ func (p *Postgres) AdminRefunds(ctx context.Context, limit int) ([]AdminRefund, 
 
 func (p *Postgres) AdminActivations(ctx context.Context, status string) ([]AdminActivation, error) {
 	rows, err := p.pool.Query(ctx,
-		`SELECT e.id, e.title, o.name, a.status, a.fee_amount, a.activated_at, a.suspended_at
+		`SELECT e.id, e.title, o.name, o.contact_email, o.contact_phone, o.payout_account_reference,
+		 a.status, a.fee_amount, a.requested_at, a.activated_at, a.suspended_at, a.review_note
 		 FROM paid_sales_activations a JOIN events e ON e.id = a.event_id JOIN organizers o ON o.id = e.organizer_id
 		 WHERE $1 = '' OR a.status = $1
-		 ORDER BY a.activated_at DESC NULLS LAST, e.id LIMIT $2`, status, AdminListLimit)
+		 ORDER BY a.requested_at DESC NULLS LAST, e.id LIMIT $2`, status, AdminListLimit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (AdminActivation, error) {
 		a := AdminActivation{Demo: true}
-		err := row.Scan(&a.EventID, &a.EventTitle, &a.OrganizerName, &a.Status, &a.FeeAmount, &a.ActivatedAt, &a.SuspendedAt)
+		err := row.Scan(&a.EventID, &a.EventTitle, &a.OrganizerName, &a.ContactEmail, &a.ContactPhone,
+			&a.PayoutAccountReference, &a.Status, &a.FeeAmount, &a.RequestedAt, &a.ActivatedAt, &a.SuspendedAt,
+			&a.ReviewNote)
 		return a, err
 	})
 }
