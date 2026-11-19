@@ -181,13 +181,19 @@ func touchCase(ctx context.Context, tx pgx.Tx, caseID, actorID, status string) e
 	return markCaseRead(ctx, tx, caseID, actorID)
 }
 
-func (p *Postgres) AddSupportMessage(ctx context.Context, v SupportViewer, caseID, body string) (SupportCase, error) {
+func (p *Postgres) AddSupportMessage(ctx context.Context, v SupportViewer, caseID, body string, files []SupportFile) (SupportCase, error) {
 	return p.updateCase(ctx, v, caseID, func(tx pgx.Tx, lc lockedCase) error {
 		status := lc.status
 		if lc.role == "requester" && (status == "waiting_for_customer" || status == "resolved") {
 			status = "open"
 		}
-		if err := insertSupportMessage(ctx, tx, caseID, v.UserID, "message", body); err != nil {
+		var messageID string
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO support_messages (case_id, author_id, kind, body) VALUES ($1, $2, 'message', $3) RETURNING id`,
+			caseID, v.UserID, body).Scan(&messageID); err != nil {
+			return err
+		}
+		if err := insertAttachments(ctx, tx, caseID, messageID, files); err != nil {
 			return err
 		}
 		n := notice{kind: "support_message",

@@ -42,7 +42,7 @@ func New(db *store.Postgres, codes *auth.Codes, opts Options) *echo.Echo {
 		e.IPExtractor = echo.ExtractIPFromXFFHeader()
 	}
 	e.Use(middleware.Recover())
-	e.Use(middleware.BodyLimit("1M"))
+	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{Limit: "1M", Skipper: largeBodyRoute}))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: opts.CORSOrigins,
 		AllowHeaders: []string{echo.HeaderAuthorization, echo.HeaderContentType, echo.HeaderAccept},
@@ -78,6 +78,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.GET("/events/:id", s.getPublicEvent)
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
 	v1.GET("/events/:id/promo", s.getPromo)
+	v1.GET("/events/:id/seating", s.getPublicSeating)
 	v1.POST("/events/:id/checkout", s.checkout, s.requireAuth)
 	v1.POST("/events/:id/report", s.reportEvent, s.requireAuth)
 	v1.GET("/me/orders", s.listMyOrders, s.requireAuth)
@@ -111,7 +112,8 @@ func (s *Server) supportRoutes(support *echo.Group) {
 	support.GET("/cases", s.listSupportCases)
 	support.GET("/cases/unread", s.unreadSupportCases)
 	support.GET("/cases/:id", s.getSupportCase)
-	support.POST("/cases/:id/messages", s.postSupportMessage)
+	support.POST("/cases/:id/messages", s.postSupportMessage, middleware.BodyLimit(attachmentBodyLimit))
+	support.GET("/cases/:id/attachments/:attachmentId", s.supportAttachment)
 	support.POST("/cases/:id/status", s.setSupportStatus)
 	support.POST("/cases/:id/assign", s.assignSupportCase)
 }
@@ -128,6 +130,8 @@ func (s *Server) organizerEventRoutes(events *echo.Group) {
 	events.POST("/:id/ticket-types", s.createTicketType)
 	events.PUT("/:id/ticket-types/:typeId", s.updateTicketType)
 	events.DELETE("/:id/ticket-types/:typeId", s.deleteTicketType)
+	events.GET("/:id/seating", s.getOrganizerSeating)
+	events.PUT("/:id/seating", s.configureSeating)
 	events.GET("/:id/paid-sales", s.getPaidSales)
 	events.POST("/:id/paid-sales/activate", s.activatePaidSales)
 	events.GET("/:id/sales", s.getEventSales)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -29,6 +30,7 @@ type Ticket struct {
 	AttendeeName   string      `json:"attendeeName"`
 	AttendeeEmail  string      `json:"attendeeEmail"`
 	Event          TicketEvent `json:"event"`
+	Seat           *SeatLabel  `json:"seat"`
 }
 
 type TicketEvent struct {
@@ -70,13 +72,15 @@ func (w SaleWindow) Open(now time.Time) bool {
 const ticketFrom = `SELECT t.id, t.status, t.qr_token, t.created_at, o.id, tt.id, tt.name,
  COALESCE(NULLIF(o.attendee_name, ''), NULLIF(u.display_name, ''), u.email),
  COALESCE(NULLIF(o.attendee_email, ''), u.email),
- e.id, e.title, e.status, e.venue_name, e.venue_address, e.timezone, e.starts_at, e.ends_at
+ e.id, e.title, e.status, e.venue_name, e.venue_address, e.timezone, e.starts_at, e.ends_at,
+ CASE WHEN st.id IS NOT NULL THEN json_build_object('section', st.section, 'row', st.row_label, 'number', st.number) END
  FROM tickets t
  JOIN order_items oi ON oi.id = t.order_item_id
  JOIN orders o ON o.id = oi.order_id
  JOIN ticket_types tt ON tt.id = oi.ticket_type_id
  JOIN events e ON e.id = tt.event_id
- JOIN users u ON u.id = t.owner_id`
+ JOIN users u ON u.id = t.owner_id
+ LEFT JOIN seats st ON st.id = t.seat_id`
 
 const ticketSelect = ticketFrom + `
  WHERE t.owner_id = $1`
@@ -87,7 +91,7 @@ func scanTicket(row pgx.Row) (Ticket, error) {
 	var t Ticket
 	err := row.Scan(&t.ID, &t.Status, &t.QRToken, &t.CreatedAt, &t.OrderID, &t.TicketTypeID,
 		&t.TicketTypeName, &t.AttendeeName, &t.AttendeeEmail, &t.Event.ID, &t.Event.Title, &t.Event.Status, &t.Event.VenueName,
-		&t.Event.VenueAddress, &t.Event.Timezone, &t.Event.StartsAt, &t.Event.EndsAt)
+		&t.Event.VenueAddress, &t.Event.Timezone, &t.Event.StartsAt, &t.Event.EndsAt, &t.Seat)
 	return t, err
 }
 
@@ -189,6 +193,9 @@ func (p *Postgres) RegisterFree(ctx context.Context, userID, eventID, ticketType
 		s, err := lockForSale(ctx, tx, eventID, ticketTypeID)
 		if err != nil {
 			return err
+		}
+		if mode, err := eventSeatingMode(ctx, tx, eventID); err != nil || mode == "assigned" {
+			return cmp.Or(err, ErrSeatSelectionRequired)
 		}
 		if err := checkSale(ctx, tx, s, ticketTypeID, quantity); err != nil {
 			return err

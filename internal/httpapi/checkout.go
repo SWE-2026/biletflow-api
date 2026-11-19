@@ -24,12 +24,19 @@ func decodeCheckout(c echo.Context, accountEmail string) (store.CheckoutInput, e
 	for i := range in.Items {
 		in.Items[i].TicketTypeID = strings.ToLower(in.Items[i].TicketTypeID)
 	}
+	for i := range in.SeatIDs {
+		in.SeatIDs[i] = strings.ToLower(in.SeatIDs[i])
+	}
 	return in, validateCheckout(in)
 }
 
 func validateCheckout(in store.CheckoutInput) error {
 	fe := fieldErrors{}
-	fe.check(len(in.Items) >= 1 && len(in.Items) <= maxCheckoutItems, "items", "Choose from 1 to 10 ticket types.")
+	if len(in.SeatIDs) > 0 {
+		validateSeatSelection(fe, in)
+	} else {
+		fe.check(len(in.Items) >= 1 && len(in.Items) <= maxCheckoutItems, "items", "Choose from 1 to 10 ticket types.")
+	}
 	seen := map[string]bool{}
 	for _, item := range in.Items {
 		fe.check(eventIDPattern.MatchString(item.TicketTypeID), "items", "Choose a ticket type.")
@@ -41,6 +48,17 @@ func validateCheckout(in store.CheckoutInput) error {
 	fe.check(validEmail(in.AttendeeEmail), "attendeeEmail", "Enter a valid attendee email address.")
 	fe.check(len(in.PromoCode) <= 32, "promoCode", "Use up to 32 characters.")
 	return fe.err()
+}
+
+func validateSeatSelection(fe fieldErrors, in store.CheckoutInput) {
+	fe.check(len(in.Items) == 0, "items", "Send seats or ticket types, not both.")
+	fe.check(len(in.SeatIDs) <= maxSeatsPerOrder, "seatIds", "Choose up to 10 seats.")
+	seen := map[string]bool{}
+	for _, id := range in.SeatIDs {
+		fe.check(eventIDPattern.MatchString(id), "seatIds", "Choose seats from the seat map.")
+		fe.check(!seen[id], "seatIds", "List each seat once.")
+		seen[id] = true
+	}
 }
 
 func (s *Server) checkout(c echo.Context) error {

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/SWE-2026/biletflow-api/internal/store"
@@ -70,6 +71,9 @@ func ticketPage(pdf *fpdf.Fpdf, t store.Ticket) error {
 	field(pdf, width, "Date and time", eventTime(t))
 	field(pdf, width, "Venue", t.Event.VenueName+"\n"+t.Event.VenueAddress)
 	field(pdf, width, "Ticket type", t.TicketTypeName)
+	if t.Seat != nil {
+		field(pdf, width, "Seat", fmt.Sprintf("Section %s · Row %s · Seat %d", strings.ToUpper(t.Seat.Section[:1])+t.Seat.Section[1:], t.Seat.Row, t.Seat.Number))
+	}
 	field(pdf, width, "Attendee", t.AttendeeName)
 	png, err := QRPNG(t.QRToken, 1024)
 	if err != nil {

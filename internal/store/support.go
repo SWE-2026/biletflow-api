@@ -41,13 +41,14 @@ type SupportCase struct {
 }
 
 type SupportMessage struct {
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	AuthorID   string    `json:"authorId"`
-	AuthorName string    `json:"authorName"`
-	AuthorRole string    `json:"authorRole"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID          string              `json:"id"`
+	Kind        string              `json:"kind"`
+	AuthorID    string              `json:"authorId"`
+	AuthorName  string              `json:"authorName"`
+	AuthorRole  string              `json:"authorRole"`
+	Body        string              `json:"body"`
+	Attachments []SupportAttachment `json:"attachments"`
+	CreatedAt   time.Time           `json:"createdAt"`
 }
 
 const caseAccess = `(c.requester_id = $1 OR (c.kind = 'attendee' AND c.organizer_id::text = $2) OR $3::bool)`
@@ -115,6 +116,9 @@ func (p *Postgres) SupportCase(ctx context.Context, v SupportViewer, caseID stri
 		return m, err
 	})
 	if err != nil {
+		return c, nil, err
+	}
+	if err := attachSupportFiles(ctx, p.pool, caseID, messages); err != nil {
 		return c, nil, err
 	}
 	if err := markCaseRead(ctx, p.pool, caseID, v.UserID); err != nil {

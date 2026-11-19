@@ -27,7 +27,7 @@ The single contract shared by the web app (`biletflow-frontend`) and the Event A
 | 401 | `unauthorized`, `invalid_credentials` |
 | 403 | `forbidden`, `email_unverified`, `account_suspended` |
 | 404 | `not_found`, `user_not_found` |
-| 409 | `ticket_not_printable`, `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported`, `already_disputed` |
+| 409 | `ticket_not_printable`, `email_taken`, `role_conflict`, `invalid_event_state`, `capacity_exceeded`, `ticket_type_in_use`, `quantity_below_sold`, `payment_required`, `registration_closed`, `ticket_limit_reached`, `sold_out`, `paid_sales_inactive`, `paid_sales_suspended`, `activation_incomplete`, `invalid_order_state`, `order_expired`, `free_order`, `refund_required`, `not_checked_in`, `promo_not_found`, `promo_disabled`, `promo_not_started`, `promo_expired`, `promo_exhausted`, `promo_not_applicable`, `invalid_state`, `already_reported`, `already_disputed`, `seat_selection_required`, `seating_not_assigned`, `seat_unavailable`, `seating_locked` |
 | 410 | `code_expired` (expired, already used, or never requested) |
 | 429 | `resend_too_soon`, `too_many_attempts`, `rate_limited` |
 | 500 | `internal` (details only in server logs) |
@@ -49,7 +49,8 @@ account number or payment credential. Creating a profile changes the current use
 
 **Event**: `{ id, organizerId, title, description, category, imageUrl, imageUrls, venueName, venueAddress,
 timezone, visibility, capacity, status, phase, startsAt, endsAt, registrationOpensAt,
-registrationClosesAt, refundPolicy, createdAt, updatedAt }`. `phase` is computed on each read:
+registrationClosesAt, refundPolicy, seatingMode, seatingLayout, createdAt, updatedAt }`. `seatingMode` is
+`general | assigned`; `seatingLayout` is the predefined layout key for assigned seating, otherwise `null`. `phase` is computed on each read:
 `cancelled` for a cancelled event, otherwise `upcoming` before `startsAt`, `active` until `endsAt`
 and `completed` after. `visibility` is `public | unlisted | private` and
 `status` is `draft | published | cancelled | suspended` (`suspended` is set by platform admins only). Times are RFC 3339 values; the event's IANA `timezone`
@@ -86,6 +87,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
 | GET | `/events/:id/promo?code=` or `?campaign=` | — | `{promo}`: validates a promo code or campaign link token |
 | POST | `/events/:id/report` 🔒 | `{reason, details?}` | 204: reports the event to platform admins |
+| GET | `/events/:id/seating` | — | `{seating}`: seat map of a published public or unlisted event (see Assigned seating) |
 | POST | `/events/:id/checkout` 🔒 | Checkout input | 201 `{order}`: holds the tickets (paid) or issues them (free) |
 | GET | `/me/orders` 🔒 | — | `{orders}`: the current user's orders, newest first |
 | GET | `/me/orders/:id` 🔒 | — | `{order, tickets}` |
@@ -118,7 +120,8 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/support/cases?status=&eventId=` 🔒 | — | `{cases}`: cases the user may see, latest activity first, up to 100 |
 | GET | `/support/cases/unread` 🔒 | — | `{unread}`: number of cases with activity the user has not seen |
 | GET | `/support/cases/:id` 🔒 | — | `{case, messages}`; marks the case read |
-| POST | `/support/cases/:id/messages` 🔒 | `{body}` | 201 `{case}` |
+| POST | `/support/cases/:id/messages` 🔒 | `{body}`, or multipart `body` + `files` | 201 `{case}`; see Attachments |
+| GET | `/support/cases/:id/attachments/:attachmentId` 🔒 | — | the attached file, as a download |
 | POST | `/support/cases/:id/status` 🔒 | `{status}` | `{case}`; handlers only |
 | POST | `/support/cases/:id/assign` 🔒 | `{assigneeId}` | `{case}`; handlers only, `null` unassigns |
 | GET | `/organizer/events/:id/campaigns` 🔒 | — | `{campaigns}`, newest first |
@@ -127,7 +130,9 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/organizer/events/:id/campaigns/:campaignId/enable` 🔒 | — | `{campaign}` |
 | POST | `/organizer/events/:id/campaigns/:campaignId/disable` 🔒 | — | `{campaign}` |
 | GET | `/organizer/events/:id/campaigns/:campaignId/qr` 🔒 | — | SVG Campaign QR code, server-generated |
-| POST | `/organizer/events/:id/duplicate` 🔒 | — | 201 `{event}`: a new draft copied from the event |
+| POST | `/organizer/events/:id/duplicate` 🔒 | — | 201 `{event}`: a new draft copied from the event, with its seating |
+| GET | `/organizer/events/:id/seating` 🔒 | — | `{seating, layouts}`: OrganizerSeating and the predefined layouts |
+| PUT | `/organizer/events/:id/seating` 🔒 | Seating input | `{seating, layouts}` |
 | GET | `/organizer/events/:id/analytics` 🔒 | — | `{analytics}`; filters `from`, `to`, `ticketTypeId` |
 | GET | `/organizer/events/:id/activity` 🔒 | — | `{activity}`: timeline; filters `from`, `to`, `type` |
 | GET | `/organizer/events/:id/attendees` 🔒 | — | `{tickets}`: StaffTicket list; filters `ticketTypeId`, `status`, `q` |
@@ -197,7 +202,8 @@ Success creates one completed order (`totalAmount` 0) and `quantity` tickets wit
 Concurrent registrations never oversell a ticket type.
 
 **Ticket**: `{ id, status, qrToken, createdAt, orderId, ticketTypeId, ticketTypeName, attendeeName,
-attendeeEmail, event: { id, title, status, venueName, venueAddress, timezone, startsAt, endsAt } }`.
+attendeeEmail, event: { id, title, status, venueName, venueAddress, timezone, startsAt, endsAt }, seat }`.
+`seat` is `{section, row, number}` for assigned seating, otherwise `null`; the PDF prints it too.
 `attendeeName`/`attendeeEmail` come from the order's attendee details, falling back to the account. `status` is
 `valid | used | cancelled | refunded`. `qrToken` is the secret encoded in the ticket's QR code; clients show it
 only to the ticket owner and never log it.
@@ -224,7 +230,7 @@ paying the fee a second time. A platform suspension is 409 `paid_sales_suspended
 is 409 `invalid_event_state`. Requesting while `pending` or `active` returns the current state.
 Activation applies to that event only; requests and decisions are recorded in the audit log.
 
-**Checkout input**: `{items: [{ticketTypeId, quantity}], attendeeName, attendeeEmail?, promoCode?}`. 1–10 items,
+**Checkout input**: `{items: [{ticketTypeId, quantity}], seatIds?, attendeeName, attendeeEmail?, promoCode?}`. 1–10 items,
 each ticket type once, quantity 1–100. `attendeeName` is 1–200 characters; `attendeeEmail` defaults to
 the account email. The account must have a verified email (403 `email_unverified`). Each item goes
 through the same 404 rules and the `registration_closed`, `ticket_limit_reached` and `sold_out` checks
@@ -236,14 +242,52 @@ for the same event. Prices and totals are always computed on the server.
   exist until a successful payment.
 - Total 0: the order is `paid` at once and its tickets are issued, without a payment.
 
+For an event with `seatingMode: assigned`, send `seatIds` (1–10 seats, each once) and no `items`; the
+server groups the seats into items by their ticket type. See Assigned seating for the seat rules.
+
 Concurrent checkouts never oversell a ticket type. With `promoCode`, the promo checks below run after
 the item checks; a failing code rejects the whole checkout.
 
 **Order**: `{ id, eventId, eventTitle, status, subtotalAmount, discountAmount, promoCode, totalAmount, attendeeName, attendeeEmail, expiresAt,
-paidAt, createdAt, items: [{ticketTypeId, ticketTypeName, quantity, unitPriceAmount}], payments:
+paidAt, createdAt, items: [{ticketTypeId, ticketTypeName, quantity, unitPriceAmount, seats}], payments:
 [Payment] }`. `status` is `pending | paid | cancelled | refunded | expired`. `expired` means a pending
 order whose hold has ended; its tickets are released. `totalAmount` is `subtotalAmount` minus
-`discountAmount`; `promoCode` is `null` without a promo.
+`discountAmount`; `promoCode` is `null` without a promo. `seats` lists `{section, row, number}` for
+assigned seating and is `[]` otherwise.
+
+### Assigned seating
+
+SRS 4.3.1 (bonus). The MVP has one predefined layout, `hall_a`: section `stalls` (rows A–B `vip`,
+12 seats; rows C–H `standard`, 14 seats; row H seats 1, 2, 13 and 14 accessible) and section
+`balcony` (rows J–L `economy`, 10 seats), 138 seats in all. There is no layout editor.
+
+**SeatingLayout**: `{ key, categories, sections: [{ key, rows: [{ label, seats, category, accessible }] }] }`.
+`accessible` lists the accessible seat numbers of the row.
+
+**Seating input** (`PUT /organizer/events/:id/seating`): `{mode, layoutKey?, categories?}`. `mode` is
+`general` or `assigned`. For `assigned`, `layoutKey` names a layout and `categories` maps every one of
+its categories to a ticket type of this event (`{"vip": "<ticketTypeId>", ...}`); otherwise 400
+`validation_failed`. Saving creates the event's seats and sets each mapped ticket type's `quantity`
+to its seat count (409 `capacity_exceeded` if the event capacity is too small). `general` removes the
+seats. Seating changes only while the event has no orders (409 `seating_locked`) and is not cancelled.
+
+**OrganizerSeating**: `{ mode, layoutKey, categories, locked }`. `locked` is true once orders exist.
+
+**EventSeating** (`GET /events/:id/seating`): `{ mode, layout, seats: [Seat] }`. `layout` is `null`
+for general admission. **Seat**: `{ id, section, row, number, category, accessible, ticketTypeId,
+priceAmount, status }`; `status` is `available | held | sold | unavailable` (`held`: in another
+unexpired pending order; `unavailable`: its ticket type is hidden or deleted).
+
+**Rules**
+
+- Checkout for an assigned-seating event needs `seatIds`: without them it is 409
+  `seat_selection_required`, and so is free registration (`/register`). `seatIds` on a general
+  admission event is 409 `seating_not_assigned`.
+- Any seat that is not `available` makes the whole checkout 409 `seat_unavailable`.
+- A pending order holds its seats until it is paid or its hold ends (15 minutes), is cancelled or
+  replaced; then the seats are free again. Refunded and cancelled tickets free their seats.
+- Seats are locked in the checkout transaction, and a seat can belong to only one valid or used
+  ticket, so concurrent checkouts never sell a seat twice.
 
 **Payment**: `{ id, amount, status, demo, createdAt }`. `status` is `failed | succeeded | refunded`.
 
@@ -406,7 +450,7 @@ eventId, eventTitle, orderId, ticketId, assigneeId, assigneeEmail, viewerRole, u
 updatedAt, lastActivityAt }`. `status` is `open | in_progress | waiting_for_customer | resolved`.
 `unread` is true when someone else acted on the case after the current user last opened it.
 
-**SupportMessage**: `{ id, kind, authorId, authorName, authorRole, body, createdAt }`. `kind` is
+**SupportMessage**: `{ id, kind, authorId, authorName, authorRole, body, attachments, createdAt }`. `kind` is
 `message`, `status_change` (`body` is the new status) or `assignment` (`body` is the assignee's
 email, empty when unassigned). `authorRole` is `requester` or `handler`. The full history is kept;
 messages cannot be edited or deleted.
@@ -419,6 +463,14 @@ messages cannot be edited or deleted.
 - `status` filters the list (`?status=open`); any other value is 400 `validation_failed`.
 - `eventId` limits the list to cases linked to one event, so organizers can review the support
   history of past and cancelled events (SRS 4.16).
+
+**Attachments** (bonus): send a message as `multipart/form-data` with a `body` field and up to 3
+`files` parts. The body may be empty when files are attached. Each file is at most 5 MB and must be
+PNG, JPEG, GIF, WebP, PDF or plain text; the type is detected from the file's content, not its name
+or header (400 `validation_failed` on `files` otherwise). The request may be up to 16 MB; JSON
+requests stay limited to 1 MB. **SupportAttachment**: `{ id, fileName, contentType, sizeBytes }`, listed
+on its message. `GET /support/cases/:id/attachments/:attachmentId` returns the file to anyone who
+may see the case (404 otherwise) with `Content-Disposition: attachment`.
 
 ## Organizer analytics, attendees and history
 

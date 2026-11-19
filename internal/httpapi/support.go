@@ -135,21 +135,29 @@ func (s *Server) postSupportMessage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var in supportMessageInput
-	if err := decodeJSON(c, &in); err != nil {
+	body, files, err := decodeSupportMessage(c)
+	if err != nil {
 		return err
 	}
-	in.Body = strings.TrimSpace(in.Body)
-	fe := fieldErrors{}
-	fe.check(len(in.Body) > 0 && len(in.Body) <= 5000, "body", "Enter a message (up to 5000 characters).")
-	if err := fe.err(); err != nil {
-		return err
-	}
-	sc, err := s.db.AddSupportMessage(c.Request().Context(), supportViewer(c), id, in.Body)
+	sc, err := s.db.AddSupportMessage(c.Request().Context(), supportViewer(c), id, body, files)
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"case": sc})
+}
+
+func decodeSupportMessage(c echo.Context) (string, []store.SupportFile, error) {
+	if isMultipart(c) {
+		return decodeSupportMultipart(c)
+	}
+	var in supportMessageInput
+	if err := decodeJSON(c, &in); err != nil {
+		return "", nil, err
+	}
+	in.Body = strings.TrimSpace(in.Body)
+	fe := fieldErrors{}
+	fe.check(len(in.Body) > 0 && len(in.Body) <= 5000, "body", "Enter a message (up to 5000 characters).")
+	return in.Body, nil, fe.err()
 }
 
 type supportStatusInput struct {

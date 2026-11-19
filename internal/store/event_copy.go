@@ -12,9 +12,9 @@ func (p *Postgres) DuplicateEvent(ctx context.Context, organizerID, actorID, sou
 		var err error
 		e, err = scanEvent(tx.QueryRow(ctx,
 			`INSERT INTO events (organizer_id, title, description, category, image_url, image_urls, venue_name,
-			 venue_address, timezone, visibility, capacity, starts_at, ends_at, refund_policy)
+			 venue_address, timezone, visibility, capacity, starts_at, ends_at, refund_policy, seating_mode, seating_layout)
 			 SELECT organizer_id, title, description, category, image_url, image_urls, venue_name,
-			 venue_address, timezone, visibility, capacity, starts_at, ends_at, refund_policy
+			 venue_address, timezone, visibility, capacity, starts_at, ends_at, refund_policy, seating_mode, seating_layout
 			 FROM events WHERE id = $1 AND organizer_id = $2 RETURNING `+eventColumns, sourceID, organizerID))
 		if err != nil {
 			return err
@@ -24,6 +24,9 @@ func (p *Postgres) DuplicateEvent(ctx context.Context, organizerID, actorID, sou
 			 max_per_order, hidden, sort_order)
 			 SELECT $2, name, description, price_amount, quantity, max_per_order, hidden, sort_order
 			 FROM ticket_types WHERE event_id = $1 ORDER BY sort_order, created_at, id`, sourceID, e.ID); err != nil {
+			return err
+		}
+		if err := copySeating(ctx, tx, sourceID, e.ID); err != nil {
 			return err
 		}
 		return writeAudit(ctx, tx, auditEntry{eventID: e.ID, actorID: actorID, action: "event.duplicated",

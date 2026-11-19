@@ -30,6 +30,8 @@ type Event struct {
 	RegistrationOpensAt  *time.Time `json:"registrationOpensAt"`
 	RegistrationClosesAt *time.Time `json:"registrationClosesAt"`
 	RefundPolicy         string     `json:"refundPolicy"`
+	SeatingMode          string     `json:"seatingMode"`
+	SeatingLayout        *string    `json:"seatingLayout"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
 }
@@ -54,14 +56,14 @@ type EventInput struct {
 
 const eventColumns = `id, organizer_id, title, description, category, image_url, image_urls, venue_name,
  venue_address, timezone, visibility, capacity, status, starts_at, ends_at,
- registration_opens_at, registration_closes_at, refund_policy, created_at, updated_at`
+ registration_opens_at, registration_closes_at, refund_policy, seating_mode, seating_layout, created_at, updated_at`
 
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
 	err := row.Scan(&e.ID, &e.OrganizerID, &e.Title, &e.Description, &e.Category, &e.ImageURL, &e.ImageURLs,
 		&e.VenueName, &e.VenueAddress, &e.Timezone, &e.Visibility, &e.Capacity, &e.Status,
 		&e.StartsAt, &e.EndsAt, &e.RegistrationOpensAt, &e.RegistrationClosesAt,
-		&e.RefundPolicy, &e.CreatedAt, &e.UpdatedAt)
+		&e.RefundPolicy, &e.SeatingMode, &e.SeatingLayout, &e.CreatedAt, &e.UpdatedAt)
 	e.Phase = eventPhase(e, time.Now())
 	return e, notFound(err)
 }

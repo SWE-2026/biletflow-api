@@ -19,6 +19,7 @@ type CheckoutInput struct {
 	AttendeeName  string         `json:"attendeeName"`
 	AttendeeEmail string         `json:"attendeeEmail"`
 	PromoCode     string         `json:"promoCode"`
+	SeatIDs       []string       `json:"seatIds"`
 }
 
 type pricedItem struct {
@@ -34,7 +35,11 @@ func (p *Postgres) Checkout(ctx context.Context, userID, eventID string, in Chec
 			 WHERE buyer_id=$1 AND event_id=$2 AND status='pending'`, userID, eventID); err != nil {
 			return err
 		}
-		items, err := reserveItems(ctx, tx, userID, eventID, in.Items)
+		requested, err := checkoutItems(ctx, tx, eventID, in)
+		if err != nil {
+			return err
+		}
+		items, err := reserveItems(ctx, tx, userID, eventID, requested)
 		if err != nil {
 			return err
 		}
@@ -44,14 +49,40 @@ func (p *Postgres) Checkout(ctx context.Context, userID, eventID string, in Chec
 				return err
 			}
 		}
-		orderID, err = insertOrder(ctx, tx, userID, eventID, in, items, totals)
-		return err
+		if orderID, err = insertOrder(ctx, tx, userID, eventID, in, items, totals); err != nil {
+			return err
+		}
+		if err := holdSeats(ctx, tx, orderID, in.SeatIDs); err != nil {
+			return err
+		}
+		if totals.subtotal > totals.discount {
+			return nil
+		}
+		if err := issueTickets(ctx, tx, orderID, userID); err != nil {
+			return err
+		}
+		return notifyOrderIssued(ctx, tx, orderID)
 	})
 	if err != nil {
 		return Order{}, err
 	}
 	o, err := loadOrder(ctx, p.pool, `o.id = $1`, orderID)
 	return o.Order, err
+}
+
+func checkoutItems(ctx context.Context, tx pgx.Tx, eventID string, in CheckoutInput) ([]CheckoutItem, error) {
+	mode, err := eventSeatingMode(ctx, tx, eventID)
+	switch {
+	case err != nil:
+		return nil, err
+	case mode == "assigned" && len(in.SeatIDs) == 0:
+		return nil, ErrSeatSelectionRequired
+	case mode != "assigned" && len(in.SeatIDs) > 0:
+		return nil, ErrSeatingNotAssigned
+	case mode == "assigned":
+		return seatItems(ctx, tx, eventID, in.SeatIDs)
+	}
+	return in.Items, nil
 }
 
 func reserveItems(ctx context.Context, tx pgx.Tx, userID, eventID string, items []CheckoutItem) ([]pricedItem, error) {
@@ -137,44 +168,48 @@ func insertOrder(ctx context.Context, tx pgx.Tx, userID, eventID string, in Chec
 		orderID, ids, quantities, prices); err != nil {
 		return "", err
 	}
-	if total == 0 {
-		if err := issueTickets(ctx, tx, orderID, userID); err != nil {
-			return "", err
-		}
-		return orderID, notifyOrderIssued(ctx, tx, orderID)
-	}
 	return orderID, nil
 }
 
 type issueRow struct {
 	itemID   string
 	quantity int
+	seatIDs  []string
 }
 
 func issueTickets(ctx context.Context, tx pgx.Tx, orderID, ownerID string) error {
-	rows, err := tx.Query(ctx, `SELECT id, quantity FROM order_items WHERE order_id=$1`, orderID)
+	rows, err := tx.Query(ctx,
+		`SELECT oi.id, oi.quantity,
+		 ARRAY(SELECT h.seat_id::text FROM seat_holds h JOIN seats s ON s.id = h.seat_id
+		  WHERE h.order_item_id = oi.id ORDER BY s.sort_order)
+		 FROM order_items oi WHERE oi.order_id=$1`, orderID)
 	if err != nil {
 		return err
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (issueRow, error) {
 		var r issueRow
-		err := row.Scan(&r.itemID, &r.quantity)
+		err := row.Scan(&r.itemID, &r.quantity, &r.seatIDs)
 		return r, err
 	})
 	if err != nil {
 		return err
 	}
-	var itemIDs, tokens []string
+	var itemIDs, tokens, seats []string
 	for _, item := range items {
-		for range item.quantity {
+		for i := range item.quantity {
+			seat := ""
+			if i < len(item.seatIDs) {
+				seat = item.seatIDs[i]
+			}
 			itemIDs = append(itemIDs, item.itemID)
 			tokens = append(tokens, rand.Text())
+			seats = append(seats, seat)
 		}
 	}
 	_, err = tx.Exec(ctx,
-		`INSERT INTO tickets (order_item_id, owner_id, qr_token)
-		 SELECT i, $2::uuid, t FROM unnest($1::text[]::uuid[], $3::text[]) AS u(i, t)`,
-		itemIDs, ownerID, tokens)
+		`INSERT INTO tickets (order_item_id, owner_id, qr_token, seat_id)
+		 SELECT i, $2::uuid, t, NULLIF(s, '')::uuid FROM unnest($1::text[]::uuid[], $3::text[], $4::text[]) AS u(i, t, s)`,
+		itemIDs, ownerID, tokens, seats)
 	return err
 }
 

@@ -26,10 +26,11 @@ func ProcessingFee(total int64, percent int) int64 {
 }
 
 type OrderItem struct {
-	TicketTypeID    string `json:"ticketTypeId"`
-	TicketTypeName  string `json:"ticketTypeName"`
-	Quantity        int    `json:"quantity"`
-	UnitPriceAmount int64  `json:"unitPriceAmount"`
+	TicketTypeID    string      `json:"ticketTypeId"`
+	TicketTypeName  string      `json:"ticketTypeName"`
+	Quantity        int         `json:"quantity"`
+	UnitPriceAmount int64       `json:"unitPriceAmount"`
+	Seats           []SeatLabel `json:"seats"`
 }
 
 type Payment struct {
@@ -125,7 +126,9 @@ type orderItemRow struct {
 
 func attachItems(ctx context.Context, q querier, orders []OrganizerOrder, index map[string]int, ids []string) error {
 	rows, err := q.Query(ctx,
-		`SELECT oi.order_id, oi.ticket_type_id, tt.name, oi.quantity, oi.unit_price_amount
+		`SELECT oi.order_id, oi.ticket_type_id, tt.name, oi.quantity, oi.unit_price_amount,
+		 COALESCE((SELECT json_agg(json_build_object('section', s.section, 'row', s.row_label, 'number', s.number)
+		  ORDER BY s.sort_order) FROM seat_holds h JOIN seats s ON s.id = h.seat_id WHERE h.order_item_id = oi.id), '[]')
 		 FROM order_items oi JOIN ticket_types tt ON tt.id = oi.ticket_type_id
 		 WHERE oi.order_id = ANY($1::text[]::uuid[])
 		 ORDER BY tt.sort_order, tt.created_at, oi.id`, ids)
@@ -134,7 +137,7 @@ func attachItems(ctx context.Context, q querier, orders []OrganizerOrder, index 
 	}
 	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (orderItemRow, error) {
 		var r orderItemRow
-		err := row.Scan(&r.orderID, &r.item.TicketTypeID, &r.item.TicketTypeName, &r.item.Quantity, &r.item.UnitPriceAmount)
+		err := row.Scan(&r.orderID, &r.item.TicketTypeID, &r.item.TicketTypeName, &r.item.Quantity, &r.item.UnitPriceAmount, &r.item.Seats)
 		return r, err
 	})
 	for _, r := range items {
