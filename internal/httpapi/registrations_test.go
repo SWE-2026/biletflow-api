@@ -160,6 +160,15 @@ func TestFreeRegistration(t *testing.T) {
 	}
 	owner.do(http.MethodPut, typePath, ticketTypeInput("Free", 3), http.StatusOK, nil)
 	owner.do(http.MethodDelete, typePath, nil, http.StatusConflict, nil)
+
+	// Free registrations are paid orders too, so they land on a day in the sales chart.
+	var analytics struct {
+		Analytics store.Analytics `json:"analytics"`
+	}
+	owner.do(http.MethodGet, "/api/v1/organizer/events/"+eventID+"/analytics", nil, http.StatusOK, &analytics)
+	if days := analytics.Analytics.SalesOverTime; len(days) != 1 || days[0].Tickets != 3 {
+		t.Fatalf("unexpected sales over time: %+v", days)
+	}
 }
 
 func TestRegistrationAccessRules(t *testing.T) {

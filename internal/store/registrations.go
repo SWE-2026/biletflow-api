@@ -216,7 +216,7 @@ func (p *Postgres) RegisterFree(ctx context.Context, userID, eventID, ticketType
 func insertFreeOrder(ctx context.Context, tx pgx.Tx, userID, eventID, ticketTypeID string, quantity int) (string, error) {
 	var orderID, itemID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO orders (status, total_amount, event_id, buyer_id) VALUES ('paid', 0, $1, $2) RETURNING id`,
+		`INSERT INTO orders (status, total_amount, event_id, buyer_id, paid_at) VALUES ('paid', 0, $1, $2, now()) RETURNING id`,
 		eventID, userID).Scan(&orderID); err != nil {
 		return "", err
 	}
