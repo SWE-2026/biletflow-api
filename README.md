@@ -6,13 +6,13 @@ and the Event Admin mobile app. The contract is in [docs/api.md](docs/api.md).
 ## Run it
 
 ```bash
-docker compose up --build          # Postgres + API on http://localhost:8080
+docker compose up --build          # Postgres + Garage + API on http://localhost:8080
 ```
 
 or, for development with `go run`:
 
 ```bash
-make db-up                         # Postgres only, on :5432
+make db-up                         # Postgres on :5432 and Garage (S3) on :3900
 make run                           # API in local mode on :8080
 ```
 
@@ -59,6 +59,10 @@ Backups and recovery are described in [docs/operations.md](docs/operations.md).
 | `SMTP_PORT` | `587` | `587` uses STARTTLS (required), `465` uses implicit TLS |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | none | SMTP credentials; keep them in the environment or a secret store, never in the repo |
 | `MAIL_FROM` | — (required with `SMTP_HOST`) | sender address, e.g. `tickets@biletflow.kz` |
+| `S3_ENDPOINT` | none (AWS S3) | S3-compatible storage URL for support attachments, e.g. `http://localhost:3900` for the Garage container |
+| `S3_REGION` | `us-east-1` | storage region; `garage` for the Garage container |
+| `S3_BUCKET` | — (required) | bucket that holds the files; the API checks it is reachable on start |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | — (required) | storage credentials; the compose and `make run` defaults are for local use only |
 | `ADMIN_EMAILS` | none | comma-separated emails promoted to platform admin on start; each account must exist and be a plain customer account |
 
 ## Checks

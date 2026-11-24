@@ -16,6 +16,7 @@ import (
 
 	"github.com/SWE-2026/biletflow-api/internal/auth"
 	"github.com/SWE-2026/biletflow-api/internal/mail"
+	"github.com/SWE-2026/biletflow-api/internal/storage"
 	"github.com/SWE-2026/biletflow-api/internal/store"
 	"github.com/labstack/echo/v4"
 )
@@ -23,6 +24,12 @@ import (
 // newDBServer starts the API against the throwaway database in TEST_DB_DSN, or skips the test
 // when it is unset so `go test ./...` stays database-free. Run DB-backed tests with `make test`.
 func newDBServer(t *testing.T) *echo.Echo {
+	t.Helper()
+	e, _ := newDBServerWithFiles(t)
+	return e
+}
+
+func newDBServerWithFiles(t *testing.T) (*echo.Echo, *storage.Memory) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DB_DSN")
 	if dsn == "" {
@@ -38,9 +45,10 @@ func newDBServer(t *testing.T) *echo.Echo {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	files := storage.NewMemory()
 	return New(db, auth.NewCodes(db, mail.LogMailer{Logger: logger}), Options{
-		SessionTTL: time.Hour, ExposeCodes: true, Logger: logger, NoAuthRateLimit: true,
-	})
+		SessionTTL: time.Hour, ExposeCodes: true, Logger: logger, NoAuthRateLimit: true, Files: files,
+	}), files
 }
 
 // uniqueEmail keeps repeated runs against the same database from colliding.

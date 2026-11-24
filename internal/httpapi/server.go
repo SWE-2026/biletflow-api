@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -24,6 +25,13 @@ type Options struct {
 	NoAuthRateLimit bool
 	WebURL          string
 	TrustProxy      bool
+	Files           FileStore
+}
+
+type FileStore interface {
+	Put(ctx context.Context, key, contentType string, data []byte) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Delete(ctx context.Context, key string) error
 }
 
 type Server struct {

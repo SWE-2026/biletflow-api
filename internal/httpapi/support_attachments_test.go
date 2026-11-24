@@ -58,7 +58,7 @@ func postAttachment(t *testing.T, c client, caseID, body, name string, data []by
 }
 
 func TestSupportAttachments(t *testing.T) {
-	e := newDBServer(t)
+	e, files := newDBServerWithFiles(t)
 	owner := createOrganizerClient(t, e, "attachments")
 	eventID := createEvent(t, owner, eventInput("public"))
 	createTicketType(t, owner, eventID, ticketTypeInput("General", 5))
@@ -79,6 +79,9 @@ func TestSupportAttachments(t *testing.T) {
 	if rec := postAttachment(t, attendee, caseID, "Here it is", "screen.png", pngBytes); rec.Code != http.StatusCreated {
 		t.Fatalf("upload: status %d; body %s", rec.Code, rec.Body.String())
 	}
+	if files.Len() != 1 {
+		t.Fatalf("stored objects = %d, want 1", files.Len())
+	}
 	var thread struct {
 		Messages []store.SupportMessage `json:"messages"`
 	}
@@ -98,4 +101,10 @@ func TestSupportAttachments(t *testing.T) {
 	stranger := signInWithCode(t, e, uniqueEmail("attachments-stranger"))
 	var notFound json.RawMessage
 	stranger.do(http.MethodGet, path, nil, http.StatusNotFound, &notFound)
+	if rec := postAttachment(t, stranger, caseID, "Not my case", "screen.png", pngBytes); rec.Code != http.StatusNotFound {
+		t.Fatalf("stranger upload: status %d; body %s", rec.Code, rec.Body.String())
+	}
+	if files.Len() != 1 {
+		t.Fatalf("stored objects after rejected upload = %d, want 1", files.Len())
+	}
 }

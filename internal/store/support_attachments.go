@@ -10,6 +10,11 @@ type SupportFile struct {
 	Name        string
 	ContentType string
 	Data        []byte
+	Key         string
+}
+
+func AttachmentKey(caseID, name string) string {
+	return "support/" + caseID + "/" + name
 }
 
 type SupportAttachment struct {
@@ -22,8 +27,8 @@ type SupportAttachment struct {
 func insertAttachments(ctx context.Context, tx pgx.Tx, caseID, messageID string, files []SupportFile) error {
 	for _, f := range files {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO support_attachments (case_id, message_id, file_name, content_type, size_bytes, data)
-			 VALUES ($1, $2, $3, $4, $5, $6)`, caseID, messageID, f.Name, f.ContentType, len(f.Data), f.Data); err != nil {
+			`INSERT INTO support_attachments (case_id, message_id, file_name, content_type, size_bytes, storage_key)
+			 VALUES ($1, $2, $3, $4, $5, $6)`, caseID, messageID, f.Name, f.ContentType, len(f.Data), f.Key); err != nil {
 			return err
 		}
 	}
@@ -64,13 +69,13 @@ func attachSupportFiles(ctx context.Context, q querier, caseID string, messages 
 	return nil
 }
 
-func (p *Postgres) SupportAttachmentFile(ctx context.Context, v SupportViewer, caseID, attachmentID string) (SupportAttachment, []byte, error) {
+func (p *Postgres) SupportAttachmentFile(ctx context.Context, v SupportViewer, caseID, attachmentID string) (SupportAttachment, string, error) {
 	var a SupportAttachment
-	var data []byte
+	var key string
 	err := p.pool.QueryRow(ctx,
-		`SELECT a.id, a.file_name, a.content_type, a.size_bytes, a.data
+		`SELECT a.id, a.file_name, a.content_type, a.size_bytes, a.storage_key
 		 FROM support_attachments a JOIN support_cases c ON c.id = a.case_id
-		 WHERE c.id = $4 AND a.id = $5 AND `+caseAccess, append(v.args(), caseID, attachmentID)...).
-		Scan(&a.ID, &a.FileName, &a.ContentType, &a.SizeBytes, &data)
-	return a, data, notFound(err)
+		 WHERE c.id = $4 AND a.id = $5 AND a.storage_key IS NOT NULL AND `+caseAccess, append(v.args(), caseID, attachmentID)...).
+		Scan(&a.ID, &a.FileName, &a.ContentType, &a.SizeBytes, &key)
+	return a, key, notFound(err)
 }

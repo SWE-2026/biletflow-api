@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/SWE-2026/biletflow-api/internal/httpapi"
 	"github.com/SWE-2026/biletflow-api/internal/mail"
 	"github.com/SWE-2026/biletflow-api/internal/notify"
+	"github.com/SWE-2026/biletflow-api/internal/storage"
 	"github.com/SWE-2026/biletflow-api/internal/store"
 )
 
@@ -59,6 +61,18 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("admin accounts checked", "configured", len(cfg.AdminEmails), "promoted", promoted)
 
+	files, err := storage.NewS3(ctx, storage.S3Config(cfg.S3))
+	if err != nil {
+		return err
+	}
+	moved, err := db.MoveAttachmentsToStorage(ctx, files)
+	if err != nil {
+		return fmt.Errorf("move attachments to storage: %w", err)
+	}
+	if moved > 0 {
+		logger.Info("support attachments moved to object storage", "count", moved)
+	}
+
 	mailer := newMailer(cfg, logger)
 	codes := auth.NewCodes(db, mailer)
 	server := httpapi.New(db, codes, httpapi.Options{
@@ -68,6 +82,7 @@ func run(logger *slog.Logger) error {
 		Logger:      logger,
 		WebURL:      cfg.WebURL,
 		TrustProxy:  cfg.TrustProxy,
+		Files:       files,
 	})
 
 	dispatchCtx, stopDispatch := context.WithCancel(context.Background())

@@ -1,5 +1,5 @@
-# Local / demo stack. `docker compose up --build` runs Postgres and the API;
-# `make db-up` starts only Postgres for running the API with `go run`.
+# Local / demo stack. `docker compose up --build` runs Postgres, Garage (S3-compatible storage) and the API;
+# `make db-up` starts Postgres and Garage for running the API with `go run`.
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,10 +17,29 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  garage:
+    build: ./docker/garage
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-6fd586906c0576bb9cef2af8762e9031bd4d1cdf7b6fb61cd5f1fa1695d11bbe}
+      S3_BUCKET: ${S3_BUCKET:-biletflow-files}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-GK0f500d505f0f2c1436e25583}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-7c555d79147640b0704e18cb740c38820fc6faaaf755491729e81cddad902447}
+    ports:
+      - "3900:3900"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/var/lib/garage/meta/biletflow-ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - garage_data:/var/lib/garage
+
   api:
     build: .
     depends_on:
       postgres:
+        condition: service_healthy
+      garage:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://biletflow:biletflow@postgres:5432/biletflow?sslmode=disable
@@ -34,6 +53,11 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://garage:3900}
+      S3_REGION: ${S3_REGION:-garage}
+      S3_BUCKET: ${S3_BUCKET:-biletflow-files}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-GK0f500d505f0f2c1436e25583}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-7c555d79147640b0704e18cb740c38820fc6faaaf755491729e81cddad902447}
     ports:
       - "8080:8080"
 
@@ -57,3 +81,4 @@ services:
 
 volumes:
   postgres_data:
+  garage_data:

@@ -25,6 +25,7 @@ type Config struct {
 	WebURL      string
 	TrustProxy  bool
 	SMTP        SMTP
+	S3          S3
 }
 
 type SMTP struct {
@@ -33,6 +34,14 @@ type SMTP struct {
 	Username string
 	Password string
 	From     string
+}
+
+type S3 struct {
+	Endpoint        string
+	Region          string
+	Bucket          string
+	AccessKeyID     string
+	SecretAccessKey string
 }
 
 func (c Config) IsLocal() bool { return c.Env == EnvLocal }
@@ -52,6 +61,13 @@ func Load() (Config, error) {
 			Password: os.Getenv("SMTP_PASSWORD"),
 			From:     os.Getenv("MAIL_FROM"),
 		},
+		S3: S3{
+			Endpoint:        strings.TrimRight(os.Getenv("S3_ENDPOINT"), "/"),
+			Region:          valueOr(os.Getenv("S3_REGION"), "us-east-1"),
+			Bucket:          os.Getenv("S3_BUCKET"),
+			AccessKeyID:     os.Getenv("S3_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("S3_SECRET_ACCESS_KEY"),
+		},
 	}
 	port, err := strconv.Atoi(valueOr(os.Getenv("SMTP_PORT"), "587"))
 	if err != nil || port <= 0 || port > 65535 {
@@ -63,6 +79,9 @@ func Load() (Config, error) {
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
+	}
+	if c.S3.Bucket == "" || c.S3.AccessKeyID == "" || c.S3.SecretAccessKey == "" {
+		return c, errors.New("S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required")
 	}
 	if c.Env != EnvLocal && c.Env != EnvProduction {
 		return c, errors.New(`APP_ENV must be "local" or "production"`)

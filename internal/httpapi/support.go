@@ -139,8 +139,13 @@ func (s *Server) postSupportMessage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	sc, err := s.db.AddSupportMessage(c.Request().Context(), supportViewer(c), id, body, files)
+	ctx := c.Request().Context()
+	if err := s.uploadAttachments(ctx, id, files); err != nil {
+		return err
+	}
+	sc, err := s.db.AddSupportMessage(ctx, supportViewer(c), id, body, files)
 	if err != nil {
+		s.removeAttachments(ctx, files)
 		return err
 	}
 	return c.JSON(http.StatusCreated, map[string]any{"case": sc})

@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"context"
+	"crypto/rand"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -91,6 +94,26 @@ func decodeSupportMultipart(c echo.Context) (string, []store.SupportFile, error)
 	return body, files, fe.err()
 }
 
+func (s *Server) uploadAttachments(ctx context.Context, caseID string, files []store.SupportFile) error {
+	for i := range files {
+		files[i].Key = store.AttachmentKey(caseID, rand.Text())
+		if err := s.opts.Files.Put(ctx, files[i].Key, files[i].ContentType, files[i].Data); err != nil {
+			s.removeAttachments(ctx, files[:i])
+			return fmt.Errorf("upload attachment: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Server) removeAttachments(ctx context.Context, files []store.SupportFile) {
+	ctx = context.WithoutCancel(ctx)
+	for _, f := range files {
+		if err := s.opts.Files.Delete(ctx, f.Key); err != nil {
+			s.opts.Logger.Error("remove orphaned attachment", "key", f.Key, "error", err)
+		}
+	}
+}
+
 func asciiFileName(name string) string {
 	return strings.Map(func(r rune) rune {
 		if r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("._-", r)) {
@@ -109,9 +132,14 @@ func (s *Server) supportAttachment(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	a, data, err := s.db.SupportAttachmentFile(c.Request().Context(), supportViewer(c), id, attachmentID)
+	ctx := c.Request().Context()
+	a, key, err := s.db.SupportAttachmentFile(ctx, supportViewer(c), id, attachmentID)
 	if err != nil {
 		return err
+	}
+	data, err := s.opts.Files.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("read attachment %s: %w", a.ID, err)
 	}
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	return sendFile(c, a.ContentType, asciiFileName(a.FileName), data)

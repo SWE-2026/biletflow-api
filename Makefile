@@ -1,17 +1,20 @@
 LOCAL_DB := postgres://biletflow:biletflow@localhost:5432/biletflow?sslmode=disable
 TEST_DB  := postgres://biletflow:biletflow@localhost:55433/biletflow_test?sslmode=disable
+LOCAL_S3 := S3_ENDPOINT=http://localhost:3900 S3_REGION=garage S3_BUCKET=biletflow-files \
+	S3_ACCESS_KEY_ID=GK0f500d505f0f2c1436e25583 \
+	S3_SECRET_ACCESS_KEY=7c555d79147640b0704e18cb740c38820fc6faaaf755491729e81cddad902447
 
 .PHONY: run db-up db-down check test-unit test test-db-up test-db-down backup restore
 
 ## run: start the API locally against `make db-up` (local mode: codes are returned as demoCode)
 run:
-	DATABASE_URL="$(LOCAL_DB)" APP_ENV=local CORS_ORIGINS=http://localhost:5173,http://localhost:8081 go run ./cmd/api
+	DATABASE_URL="$(LOCAL_DB)" $(LOCAL_S3) APP_ENV=local CORS_ORIGINS=http://localhost:5173,http://localhost:8081 go run ./cmd/api
 
 db-up:
-	docker compose up -d --wait postgres
+	docker compose up -d --wait postgres garage
 
 db-down:
-	docker compose stop postgres
+	docker compose stop postgres garage
 
 ## check: everything that must pass before work counts as done
 check:

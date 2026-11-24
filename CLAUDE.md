@@ -8,7 +8,7 @@ organizers, Event Admins, platform admins). Clients: `biletflow-frontend` (React
 
 - Go (module `github.com/SWE-2026/biletflow-api`, `go 1.26` floor in go.mod — check before using newer features)
 - Echo v4, pgx v5 (pgxpool), PostgreSQL 17, bcrypt
-- Docker: multi-stage build to distroless; `docker-compose.yml` runs Postgres + API
+- Docker: multi-stage build to distroless; `docker-compose.yml` runs Postgres + Garage (S3-compatible) + API
 
 ## Commands (verify every change with these)
 
@@ -29,6 +29,7 @@ internal/httpapi/   Echo routes, middleware, handlers, request validation, error
 internal/auth/      one-time email codes, password hashing, session tokens (no HTTP)
 internal/store/     Postgres queries and transactions, domain types, domain errors
 internal/mail/      Mailer; LogMailer until an email provider is chosen
+internal/storage/   S3-compatible object storage (aws-sdk-go-v2) and an in-memory fake for tests
 migrations/         numbered SQL files, embedded and applied on start
 docs/api.md         the API contract shared with both clients
 ```
