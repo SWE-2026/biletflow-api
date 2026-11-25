@@ -2,8 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"encoding/csv"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/SWE-2026/biletflow-api/internal/store"
@@ -77,4 +81,67 @@ func TestAdminReviewsPaidSales(t *testing.T) {
 	if got, ok = findActivation(admin, "active", eventID); !ok || got.ActivatedAt == nil {
 		t.Fatalf("approved activation: %+v, listed %v", got, ok)
 	}
+}
+
+func TestAdminFindsOrdersByShortNumberAndExportsDemoFlag(t *testing.T) {
+	e := newDBServer(t)
+	owner, eventID, typeID := paidEvent(t, e, "admin-search", 5000, 10, 4)
+	buyer := signInWithCode(t, e, uniqueEmail("admin-search-buyer"))
+	var created orderResponse
+	buyer.do(http.MethodPost, "/api/v1/events/"+eventID+"/checkout",
+		checkoutInput(store.CheckoutItem{TicketTypeID: typeID, Quantity: 1}), http.StatusCreated, &created)
+	orderID := created.Order.ID
+	buyer.do(http.MethodPost, "/api/v1/me/orders/"+orderID+"/pay", payInput{Outcome: "succeeded"}, http.StatusOK, nil)
+
+	admin := signInAsAdmin(t, e)
+	short := strings.ToUpper(orderID[:8])
+	tests := []struct {
+		give string
+		want int
+	}{
+		{give: orderID, want: 1},
+		{give: short, want: 1},
+		{give: orderID[:7], want: 0},
+	}
+	for _, tt := range tests {
+		var orders struct {
+			Orders []store.OrganizerOrder `json:"orders"`
+		}
+		admin.do(http.MethodGet, "/api/v1/admin/orders?q="+tt.give, nil, http.StatusOK, &orders)
+		var payments struct {
+			Payments []store.AdminPayment `json:"payments"`
+		}
+		admin.do(http.MethodGet, "/api/v1/admin/payments?q="+tt.give, nil, http.StatusOK, &payments)
+		if len(orders.Orders) != tt.want || len(payments.Payments) != tt.want {
+			t.Errorf("q=%s: %d orders, %d payments, want %d", tt.give, len(orders.Orders), len(payments.Payments), tt.want)
+		}
+	}
+
+	owner.do(http.MethodPost, "/api/v1/organizer/events/"+eventID+"/orders/"+orderID+"/refund", refundInput{}, http.StatusOK, nil)
+	var activity struct {
+		Activity []store.ActivityEntry `json:"activity"`
+	}
+	owner.do(http.MethodGet, "/api/v1/organizer/events/"+eventID+"/activity?type=refund", nil, http.StatusOK, &activity)
+	if len(activity.Activity) != 1 || !strings.HasSuffix(activity.Activity[0].Description, "for order "+short) {
+		t.Fatalf("refund entry does not name its order: %+v", activity.Activity)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/export/orders", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+admin.token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	records, err := csv.NewReader(rec.Body).ReadAll()
+	if err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("export: status %d, err %v", rec.Code, err)
+	}
+	demo := slices.Index(records[0], "demo")
+	for _, r := range records[1:] {
+		if r[0] == orderID {
+			if demo < 0 || r[demo] != "true" {
+				t.Fatalf("order row has no demo flag: header %v, row %v", records[0], r)
+			}
+			return
+		}
+	}
+	t.Fatal("order missing from the export")
 }
