@@ -106,11 +106,38 @@ func (p *Postgres) ListTicketTypes(ctx context.Context, organizerID, eventID str
 		`SELECT `+ticketTypeColumns+` FROM ticket_types WHERE event_id=$1 ORDER BY sort_order, created_at, id`, eventID))
 }
 
+// takenTicketsExpr counts the places of ticket type tt that are no longer for sale: issued tickets
+// that are valid or used, plus quantities held by unexpired pending orders. Checkout and the public
+// event page both use it, so the page shows exactly what checkout will allow.
+const takenTicketsExpr = `(
+ (SELECT count(*) FROM tickets t JOIN order_items oi ON oi.id = t.order_item_id
+  WHERE oi.ticket_type_id = tt.id AND t.status IN ('valid','used'))
+ + (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+  WHERE oi.ticket_type_id = tt.id AND o.status = 'pending' AND o.expires_at > now())
+)`
+
+// PublicTicketType is a ticket type as attendees see it, with the number of places still for sale.
+type PublicTicketType struct {
+	TicketType
+	Available int `json:"available"`
+}
+
 // ListVisibleTicketTypes returns the ticket types attendees can see; the caller checks the event is public.
-func (p *Postgres) ListVisibleTicketTypes(ctx context.Context, eventID string) ([]TicketType, error) {
-	return collectTicketTypes(p.pool.Query(ctx,
-		`SELECT `+ticketTypeColumns+` FROM ticket_types WHERE event_id=$1 AND NOT hidden
-		 ORDER BY sort_order, created_at, id`, eventID))
+func (p *Postgres) ListVisibleTicketTypes(ctx context.Context, eventID string) ([]PublicTicketType, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT `+ticketTypeColumns+`, GREATEST(tt.quantity - `+takenTicketsExpr+`, 0)
+		 FROM ticket_types tt WHERE tt.event_id=$1 AND NOT tt.hidden
+		 ORDER BY tt.sort_order, tt.created_at, tt.id`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (PublicTicketType, error) {
+		var t PublicTicketType
+		err := row.Scan(&t.ID, &t.EventID, &t.Name, &t.Description, &t.PriceAmount, &t.Quantity,
+			&t.SalesStartsAt, &t.SalesEndsAt, &t.MaxPerOrder, &t.Hidden, &t.SortOrder,
+			&t.CreatedAt, &t.UpdatedAt, &t.Available)
+		return t, err
+	})
 }
 
 func (p *Postgres) CreateTicketType(ctx context.Context, organizerID, actorID, eventID string, in TicketTypeInput) (TicketType, error) {

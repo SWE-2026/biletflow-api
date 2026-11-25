@@ -341,6 +341,43 @@ func TestCheckoutHoldsInventory(t *testing.T) {
 	}
 }
 
+func TestPublicEventShowsAvailability(t *testing.T) {
+	e := newDBServer(t)
+	_, eventID, typeID := paidEvent(t, e, "availability", 2000, 3, 3)
+	path := "/api/v1/events/" + eventID + "/checkout"
+	first := signInWithCode(t, e, uniqueEmail("avail-first"))
+	second := signInWithCode(t, e, uniqueEmail("avail-second"))
+	available := func(want int, when string) {
+		t.Helper()
+		var page struct {
+			TicketTypes []store.PublicTicketType `json:"ticketTypes"`
+		}
+		first.do(http.MethodGet, "/api/v1/events/"+eventID, nil, http.StatusOK, &page)
+		for _, tt := range page.TicketTypes {
+			if tt.ID == typeID {
+				if tt.Available != want {
+					t.Fatalf("%s: available = %d, want %d", when, tt.Available, want)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s: ticket type missing from the event page", when)
+	}
+
+	available(3, "before any order")
+	var paid orderResponse
+	first.do(http.MethodPost, path, checkoutInput(store.CheckoutItem{TicketTypeID: typeID, Quantity: 2}), http.StatusCreated, &paid)
+	available(1, "while two tickets are held")
+	first.do(http.MethodPost, "/api/v1/me/orders/"+paid.Order.ID+"/pay", payInput{Outcome: "succeeded"}, http.StatusOK, nil)
+	available(1, "after paying for the hold")
+
+	var held orderResponse
+	second.do(http.MethodPost, path, checkoutInput(store.CheckoutItem{TicketTypeID: typeID, Quantity: 1}), http.StatusCreated, &held)
+	available(0, "when sold out")
+	second.do(http.MethodPost, "/api/v1/me/orders/"+held.Order.ID+"/cancel", nil, http.StatusOK, nil)
+	available(1, "after a hold is cancelled")
+}
+
 func TestCheckoutDoesNotOversell(t *testing.T) {
 	e := newDBServer(t)
 	_, eventID, typeID := paidEvent(t, e, "checkout-race", 1000, 2, 1)

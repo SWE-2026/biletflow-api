@@ -39,7 +39,7 @@ func (s *Server) getPublicEvent(c echo.Context) error {
 		return err
 	}
 	if types == nil {
-		types = []store.TicketType{}
+		types = []store.PublicTicketType{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"event": event, "ticketTypes": types})
 }

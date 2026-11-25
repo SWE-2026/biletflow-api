@@ -61,6 +61,11 @@ salesEndsAt, maxPerOrder, hidden, sortOrder, createdAt, updatedAt }`. `priceAmou
 (0 = free). `salesStartsAt`/`salesEndsAt` are `null` when unrestricted. Hidden types are left out
 of the attendee event page. Lists are ordered by `sortOrder`, then creation time.
 
+**PublicTicketType** (`GET /events/:id`): a TicketType plus `available`, the places still for sale:
+`quantity` minus valid or used tickets and minus quantities held by unexpired pending orders, never
+below 0. It uses the same count as checkout, so `available: 0` means checkout answers 409 `sold_out`.
+It is a snapshot; checkout re-checks under a row lock.
+
 ## Endpoints
 
 Both sign-in styles reach the same account, matched by email. `/auth` is rate-limited per IP.
@@ -83,7 +88,7 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | POST | `/me/notifications/:id/read` 🔒 | — | 204 |
 | POST | `/me/notifications/read-all` 🔒 | — | 204 |
 | GET | `/events` | — | `{events}`: published **public** events |
-| GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types |
+| GET | `/events/:id` | — | `{event, ticketTypes}`: published public or unlisted event and its visible ticket types, each with `available` (see PublicTicketType) |
 | POST | `/events/:id/register` 🔒 | `{ticketTypeId, quantity}` | 201 `{orderId, tickets}`: free tickets for a verified account |
 | GET | `/events/:id/promo?code=` or `?campaign=` | — | `{promo}`: validates a promo code or campaign link token |
 | POST | `/events/:id/report` 🔒 | `{reason, details?}` | 204: reports the event to platform admins |

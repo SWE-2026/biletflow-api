@@ -125,13 +125,7 @@ func (p *Postgres) OrderTickets(ctx context.Context, orderID string) ([]Ticket, 
 func soldTickets(ctx context.Context, tx pgx.Tx, ticketTypeID string) (int, error) {
 	var total int
 	err := tx.QueryRow(ctx,
-		`SELECT COALESCE(SUM(n), 0)::bigint FROM (
-		 SELECT 1 AS n FROM tickets t JOIN order_items oi ON oi.id = t.order_item_id
-		 WHERE oi.ticket_type_id = $1 AND t.status IN ('valid','used')
-		 UNION ALL
-		 SELECT oi.quantity FROM order_items oi JOIN orders o ON o.id = oi.order_id
-		 WHERE oi.ticket_type_id = $1 AND o.status = 'pending' AND o.expires_at > now()
-		 ) taken`,
+		`SELECT `+takenTicketsExpr+`::bigint FROM ticket_types tt WHERE tt.id = $1`,
 		ticketTypeID).Scan(&total)
 	return total, err
 }
