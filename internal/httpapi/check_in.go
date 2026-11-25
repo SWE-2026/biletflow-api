@@ -15,7 +15,10 @@ type staffInput struct {
 
 type scanInput struct {
 	QRToken string `json:"qrToken"`
+	ScanID  string `json:"scanId"`
 }
+
+const maxQRTokenLength = 512
 
 func (s *Server) listStaff(c echo.Context) error {
 	id, err := eventID(c)
@@ -125,11 +128,12 @@ func (s *Server) checkInByToken(c echo.Context) error {
 	}
 	in.QRToken = strings.TrimSpace(in.QRToken)
 	fe := fieldErrors{}
-	fe.check(len(in.QRToken) > 0 && len(in.QRToken) <= 512, "qrToken", "Scan a ticket QR code.")
+	fe.check(len(in.QRToken) > 0 && len(in.QRToken) <= maxQRTokenLength, "qrToken", "Scan a ticket QR code.")
+	fe.check(in.ScanID == "" || eventIDPattern.MatchString(in.ScanID), "scanId", "Use a UUID.")
 	if err := fe.err(); err != nil {
 		return err
 	}
-	res, err := s.db.CheckInByToken(c.Request().Context(), currentUser(c).ID, id, in.QRToken)
+	res, err := s.db.CheckInByToken(c.Request().Context(), currentUser(c).ID, id, in.QRToken, in.ScanID)
 	if err != nil {
 		return err
 	}

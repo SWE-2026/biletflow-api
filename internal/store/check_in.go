@@ -126,52 +126,109 @@ func (p *Postgres) SearchAttendees(ctx context.Context, userID, eventID, query s
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (StaffTicket, error) { return scanStaffTicket(row) })
 }
 
-func (p *Postgres) CheckInByToken(ctx context.Context, userID, eventID, token string) (CheckInResult, error) {
-	return p.checkIn(ctx, userID, eventID, byToken, token)
+// scanMeta describes the scan behind a check-in. The zero value is a live scan without an ID,
+// recorded at the server's current time.
+type scanMeta struct {
+	// id is the scanner's own ID for the scan; a repeat of it returns the first outcome.
+	id string
+	// at is when an offline scanner admitted the ticket; nil means now.
+	at *time.Time
+}
+
+// CheckInByToken checks in the ticket with this QR token. scanID is optional (empty for none).
+func (p *Postgres) CheckInByToken(ctx context.Context, userID, eventID, token, scanID string) (CheckInResult, error) {
+	return p.checkIn(ctx, userID, eventID, byToken, token, scanMeta{id: scanID})
 }
 
 func (p *Postgres) CheckInByID(ctx context.Context, userID, eventID, ticketID string) (CheckInResult, error) {
-	return p.checkIn(ctx, userID, eventID, byID, ticketID)
+	return p.checkIn(ctx, userID, eventID, byID, ticketID, scanMeta{})
 }
 
-func (p *Postgres) checkIn(ctx context.Context, userID, eventID, match, value string) (CheckInResult, error) {
+func (p *Postgres) checkIn(ctx context.Context, userID, eventID, match, value string, scan scanMeta) (CheckInResult, error) {
 	var res CheckInResult
 	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
 		if _, err := requireCheckInAccess(ctx, tx, userID, eventID); err != nil {
 			return err
 		}
-		var ticketID string
-		err := tx.QueryRow(ctx,
-			`UPDATE tickets t SET status = 'used'
-			 FROM order_items oi JOIN orders o ON o.id = oi.order_id
-			 WHERE oi.id = t.order_item_id AND o.event_id = $1`+match+` AND t.status = 'valid'
-			 RETURNING t.id`, eventID, value).Scan(&ticketID)
-		switch {
-		case err == nil:
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO check_ins (ticket_id, checked_in_by, checked_in_at) VALUES ($1, $2, now())`,
-				ticketID, userID); err != nil {
-				return err
-			}
-			if err := writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: userID, action: "check_in.recorded",
-				entityType: "ticket", entityID: ticketID, details: map[string]any{}}); err != nil {
-				return err
-			}
-		case !errors.Is(err, pgx.ErrNoRows):
+		replayed, found, err := replayedScan(ctx, tx, userID, eventID, scan.id)
+		if err != nil || found {
+			res = replayed
 			return err
 		}
-		ticket, err := scanStaffTicket(tx.QueryRow(ctx, staffTicketSelect+match, eventID, value))
-		if errors.Is(err, pgx.ErrNoRows) {
-			res.Result = "invalid"
-			if match == byToken && isCampaignToken(ctx, tx, value) {
-				res.Result = "campaign_qr"
-			}
-			return nil
+		admitted, err := admitTicket(ctx, tx, userID, eventID, match, value, scan)
+		if err != nil {
+			return err
 		}
-		res.Result, res.Ticket = checkInResult(ticketID != "", ticket.Status), &ticket
+		res, err = describeCheckIn(ctx, tx, eventID, match, value, admitted)
 		return err
 	})
 	return res, err
+}
+
+// replayedScan answers a scan ID this user already sent: the check-in it created counts as
+// admitted, so a scanner that lost the first response does not report a false duplicate.
+func replayedScan(ctx context.Context, tx pgx.Tx, userID, eventID, scanID string) (CheckInResult, bool, error) {
+	if scanID == "" {
+		return CheckInResult{}, false, nil
+	}
+	var ticketID string
+	err := tx.QueryRow(ctx, `SELECT ticket_id FROM check_ins WHERE scan_id = $1 AND checked_in_by = $2`,
+		scanID, userID).Scan(&ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CheckInResult{}, false, nil
+	}
+	if err != nil {
+		return CheckInResult{}, false, err
+	}
+	ticket, err := scanStaffTicket(tx.QueryRow(ctx, staffTicketSelect+byID, eventID, ticketID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CheckInResult{Result: "invalid"}, true, nil
+	}
+	return CheckInResult{Result: "valid", Ticket: &ticket}, true, err
+}
+
+// admitTicket marks a valid ticket used and records the check-in; false when the ticket is not
+// valid (or not found). The guarded UPDATE admits a ticket at most once under concurrent scans.
+func admitTicket(ctx context.Context, tx pgx.Tx, userID, eventID, match, value string, scan scanMeta) (bool, error) {
+	var ticketID string
+	err := tx.QueryRow(ctx,
+		`UPDATE tickets t SET status = 'used'
+		 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+		 WHERE oi.id = t.order_item_id AND o.event_id = $1`+match+` AND t.status = 'valid'
+		 RETURNING t.id`, eventID, value).Scan(&ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO check_ins (ticket_id, checked_in_by, checked_in_at, scan_id)
+		 VALUES ($1, $2, COALESCE($3::timestamptz, now()), NULLIF($4, '')::uuid)`,
+		ticketID, userID, scan.at, scan.id); err != nil {
+		return false, err
+	}
+	details := map[string]any{}
+	if scan.at != nil {
+		details = map[string]any{"offline": true, "scannedAt": scan.at.UTC().Format(time.RFC3339)}
+	}
+	return true, writeAudit(ctx, tx, auditEntry{eventID: eventID, actorID: userID, action: "check_in.recorded",
+		entityType: "ticket", entityID: ticketID, details: details})
+}
+
+func describeCheckIn(ctx context.Context, tx pgx.Tx, eventID, match, value string, admitted bool) (CheckInResult, error) {
+	ticket, err := scanStaffTicket(tx.QueryRow(ctx, staffTicketSelect+match, eventID, value))
+	if errors.Is(err, pgx.ErrNoRows) {
+		res := CheckInResult{Result: "invalid"}
+		if match == byToken && isCampaignToken(ctx, tx, value) {
+			res.Result = "campaign_qr"
+		}
+		return res, nil
+	}
+	if err != nil {
+		return CheckInResult{}, err
+	}
+	return CheckInResult{Result: checkInResult(admitted, ticket.Status), Ticket: &ticket}, nil
 }
 
 func isCampaignToken(ctx context.Context, tx pgx.Tx, value string) bool {

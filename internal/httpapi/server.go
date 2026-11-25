@@ -101,6 +101,8 @@ func (s *Server) routes(v1 *echo.Group) {
 	staff.GET("/events/:id", s.getStaffEvent)
 	staff.GET("/events/:id/attendees", s.searchAttendees)
 	staff.POST("/events/:id/check-in", s.checkInByToken)
+	staff.GET("/events/:id/offline-manifest", s.getOfflineManifest)
+	staff.POST("/events/:id/offline-check-ins", s.syncOfflineCheckIns)
 	staff.POST("/events/:id/tickets/:ticketId/check-in", s.checkInByID)
 	staff.POST("/events/:id/tickets/:ticketId/undo", s.undoCheckIn)
 

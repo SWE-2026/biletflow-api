@@ -143,7 +143,9 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/staff/events` 🔒 | — | `{events}`: published events the user may check in |
 | GET | `/staff/events/:id` 🔒 | — | `{event, role, summary}` |
 | GET | `/staff/events/:id/attendees?q=` 🔒 | — | `{tickets}`: StaffTicket search, up to 50 |
-| POST | `/staff/events/:id/check-in` 🔒 | `{qrToken}` | CheckInResult |
+| POST | `/staff/events/:id/check-in` 🔒 | `{qrToken, scanId?}` | CheckInResult |
+| GET | `/staff/events/:id/offline-manifest` 🔒 | — | OfflineManifest: every ticket, for offline check-in |
+| POST | `/staff/events/:id/offline-check-ins` 🔒 | `{scans}` | `{results}`: replays offline scans |
 | POST | `/staff/events/:id/tickets/:ticketId/check-in` 🔒 | — | CheckInResult: manual check-in |
 | POST | `/staff/events/:id/tickets/:ticketId/undo` 🔒 | — | `{ticket}`: reverses a check-in |
 
@@ -322,7 +324,8 @@ and cancellations are written to an append-only audit log.
 
 ## Event Admins and check-in
 
-Used by the mobile ticket-verification app (SRS 4.8). Verification is online only.
+Used by the mobile ticket-verification app (SRS 4.8). Verification is online, with an offline
+fallback (bonus, see "Offline check-in" below).
 
 **Staff assignment** (organizer, own events only, else 404): `{email, role}` where `role` is
 `scanner | supervisor`. The email must belong to an existing account (404 `user_not_found`); the
@@ -367,6 +370,34 @@ first 50 tickets by name. Results include tickets of every status.
 **Undo** (`.../undo`): only the owner or a `supervisor` (403 `forbidden` for a `scanner`). Returns the
 ticket to `valid` and marks the check-in reversed; the reversal is written to the audit log. A ticket
 that is not checked in is 409 `not_checked_in`.
+
+**Scan ID** (optional on `POST .../check-in`): a UUID the scanner makes for each scan. A repeat of
+the same ID by the same user returns `valid` with the ticket the first scan admitted, so a scanner
+that lost a response (and queued the scan offline) does not see its own check-in as a duplicate.
+
+### Offline check-in
+
+Bonus (SRS 8, "Offline ticket-verification synchronization"). A demonstration feature, not
+production-grade: two offline devices can each admit the same ticket, and the conflict only shows
+when they sync.
+
+**OfflineManifest** (`GET .../offline-manifest`, same access as check-in, 409 `invalid_event_state`
+unless published): `{ generatedAt, tickets: [OfflineTicket] }`. **OfflineTicket** is a StaffTicket
+of any status plus `tokenHash`, the SHA-256 of the ticket's QR token in lowercase hex. The token
+itself is never sent. Tickets issued after `generatedAt` are not in it.
+
+The scanner checks a scanned code locally: a code containing `campaign=` or starting with `cmp_` is
+`campaign_qr`; otherwise it hashes the code and looks it up. A `valid` ticket is admitted and the scan
+queued.
+
+**Sync** (`POST .../offline-check-ins`): `{ scans: [{ scanId, qrToken, scannedAt }] }`, 1 to 200
+scans, each with a unique UUID `scanId`, a `qrToken` of up to 512 characters and an RFC 3339
+`scannedAt` (400 `validation_failed`, fields `scans` or `scans.<index>`). Scans are applied in
+order, each like a live scan, and the check-in records `scannedAt` (a time in the future is
+recorded as now). Returns `{ results: [{ scanId, result, ticket }] }` in the same order; `result`
+is a CheckInResult outcome. `already_used` means someone else (or an earlier scan) admitted the
+ticket first. A `scanId` sent before returns its first outcome, so a retried sync is safe. The
+audit entry of an offline check-in has `details: {offline: true, scannedAt}`.
 
 ## Promo codes and Campaign QR codes
 
