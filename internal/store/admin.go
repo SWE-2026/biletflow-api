@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -68,6 +69,17 @@ type AdminActivation struct {
 
 func limitClause(limit int) string { return " LIMIT " + strconv.Itoa(limit) }
 
+// orderIDPrefix returns a LIKE pattern that matches order IDs starting with q, so admins can search by
+// the short order number the apps show (the ID's first 8 characters). It returns "" (no prefix search)
+// unless q is at least that long and looks like the start of a UUID.
+func orderIDPrefix(q string) string {
+	q = strings.ToLower(q)
+	if len(q) < 8 || strings.Trim(q, "0123456789abcdef-") != "" {
+		return ""
+	}
+	return q + "%"
+}
+
 func (p *Postgres) AdminUsers(ctx context.Context, query string) ([]AdminUser, error) {
 	rows, err := p.pool.Query(ctx,
 		`SELECT id, email, display_name, role, organizer_id, email_verified_at IS NOT NULL, suspended_at, created_at
@@ -101,8 +113,8 @@ func (p *Postgres) AdminEvent(ctx context.Context, id string) (Event, error) {
 
 func (p *Postgres) AdminOrders(ctx context.Context, query, status string, limit int) ([]OrganizerOrder, error) {
 	return loadOrdersLimit(ctx, p.pool,
-		`($1 = '' OR o.id::text = $1 OR u.email ILIKE $2 OR o.attendee_email ILIKE $2 OR e.title ILIKE $2)
-		 AND ($3 = '' OR o.status = $3)`, limitClause(limit), query, likePattern(query), status)
+		`($1 = '' OR ($4 <> '' AND o.id::text LIKE $4) OR u.email ILIKE $2 OR o.attendee_email ILIKE $2 OR e.title ILIKE $2)
+		 AND ($3 = '' OR o.status = $3)`, limitClause(limit), query, likePattern(query), status, orderIDPrefix(query))
 }
 
 func (p *Postgres) AdminPayments(ctx context.Context, query, status string, limit int) ([]AdminPayment, error) {
@@ -110,9 +122,9 @@ func (p *Postgres) AdminPayments(ctx context.Context, query, status string, limi
 		`SELECT pm.id, o.id, e.id, e.title, u.email, pm.amount, pm.status, pm.provider, pm.created_at
 		 FROM payments pm JOIN orders o ON o.id = pm.order_id JOIN events e ON e.id = o.event_id
 		 JOIN users u ON u.id = o.buyer_id
-		 WHERE ($1 = '' OR o.id::text = $1 OR u.email ILIKE $2 OR e.title ILIKE $2)
+		 WHERE ($1 = '' OR ($5 <> '' AND o.id::text LIKE $5) OR u.email ILIKE $2 OR e.title ILIKE $2)
 		 AND ($3 = '' OR pm.status = $3)
-		 ORDER BY pm.created_at DESC, pm.id LIMIT $4`, query, likePattern(query), status, limit)
+		 ORDER BY pm.created_at DESC, pm.id LIMIT $4`, query, likePattern(query), status, limit, orderIDPrefix(query))
 	if err != nil {
 		return nil, err
 	}

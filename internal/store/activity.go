@@ -70,6 +70,16 @@ func change(d map[string]any, key, label string) string {
 	return fmt.Sprintf("; %s %v → %v", label, pair[0], pair[1])
 }
 
+// forOrder names the order an entry affects by its short number, the ID's first 8 characters
+// in upper case as the apps show it.
+func forOrder(d map[string]any) string {
+	id, ok := d["orderId"].(string)
+	if !ok || len(id) < 8 {
+		return ""
+	}
+	return " for order " + strings.ToUpper(id[:8])
+}
+
 var fixedDescriptions = map[string]string{
 	"event.created":          "Event created",
 	"event.duplicated":       "Event created as a copy of another event",
@@ -120,7 +130,7 @@ func describeActivity(action string, d map[string]any) string {
 	case "payment.failed":
 		return fmt.Sprintf("Demo payment of %v KZT failed", d["amount"])
 	case "refund.succeeded":
-		return fmt.Sprintf("Demo refund of %v KZT issued", d["amount"])
+		return fmt.Sprintf("Demo refund of %v KZT issued", d["amount"]) + forOrder(d)
 	case "staff.assigned":
 		return fmt.Sprintf("Staff member assigned as %v", d["role"])
 	case "campaign.created":

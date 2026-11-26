@@ -610,8 +610,8 @@ Organizer accounts are not promoted.
 | GET | `/admin/users` | `q` (email, name or ID) | `{users}`: AdminUser |
 | GET | `/admin/events` | `q` (title, venue or ID), `status` | `{events}` |
 | GET | `/admin/events/:id/activity` | `from`, `to`, `type` | `{activity}`: the event timeline |
-| GET | `/admin/orders` | `q` (order ID, buyer or attendee email, event title), `status` | `{orders}`: OrganizerOrder |
-| GET | `/admin/payments` | `q`, `status` (`failed` lists payment failures) | `{payments}`: AdminPayment |
+| GET | `/admin/orders` | `q` (order ID or its first 8+ characters, buyer or attendee email, event title), `status` | `{orders}`: OrganizerOrder |
+| GET | `/admin/payments` | `q` (order ID or its first 8+ characters, buyer email, event title), `status` (`failed` lists payment failures) | `{payments}`: AdminPayment |
 | GET | `/admin/refunds` | — | `{refunds}`: AdminRefund |
 | GET | `/admin/disputes` | `status` (`open`, `refunded`, `rejected`) | `{disputes}`: Dispute |
 | POST | `/admin/disputes/:disputeId/resolve` | `{decision, note}` | `{dispute}` |
@@ -676,6 +676,7 @@ Admin suspensions, restorations and report decisions are written to the audit lo
 appear in that event's timeline (types `event`, `paid_sales`, `report`, `dispute`).
 
 **CSV export**: comma-separated with a header row; money is whole KZT and times are RFC 3339 UTC.
+Every file has a `demo` column (`true` for simulated money; an order is demo when all its payments are).
 Cells that start with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'` so spreadsheet
 apps do not run them as formulas.
 

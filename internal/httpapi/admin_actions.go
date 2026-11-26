@@ -148,6 +148,12 @@ func csvCell(v string) string {
 	return v
 }
 
+// orderIsDemo reports whether every payment on the order is simulated; an order without payments
+// (free, or never paid) moved no money at all.
+func orderIsDemo(o store.OrganizerOrder) bool {
+	return !slices.ContainsFunc(o.Payments, func(p store.Payment) bool { return !p.Demo })
+}
+
 func csvTime(t *time.Time) string {
 	if t == nil {
 		return ""
@@ -161,10 +167,10 @@ func (s *Server) exportRows(c echo.Context, kind string) ([][]string, error) {
 	switch kind {
 	case "orders":
 		orders, err := s.db.AdminOrders(ctx, "", "", store.ExportLimit)
-		rows := [][]string{{"order_id", "event", "buyer_email", "status", "subtotal_kzt", "discount_kzt", "total_kzt", "processing_fee_kzt", "created_at", "paid_at"}}
+		rows := [][]string{{"order_id", "event", "buyer_email", "status", "subtotal_kzt", "discount_kzt", "total_kzt", "processing_fee_kzt", "demo", "created_at", "paid_at"}}
 		for _, o := range orders {
 			rows = append(rows, []string{o.ID, o.EventTitle, o.BuyerEmail, o.Status, itoa(o.SubtotalAmount), itoa(o.DiscountAmount),
-				itoa(o.TotalAmount), itoa(o.ProcessingFeeAmount), csvTime(&o.CreatedAt), csvTime(o.PaidAt)})
+				itoa(o.TotalAmount), itoa(o.ProcessingFeeAmount), strconv.FormatBool(orderIsDemo(o)), csvTime(&o.CreatedAt), csvTime(o.PaidAt)})
 		}
 		return rows, err
 	case "payments":
