@@ -25,7 +25,9 @@ type Options struct {
 	NoAuthRateLimit bool
 	WebURL          string
 	TrustProxy      bool
-	Files           FileStore
+	// LogRequests logs every request's method, path, status and duration (debugging aid).
+	LogRequests bool
+	Files       FileStore
 }
 
 type FileStore interface {
@@ -50,6 +52,9 @@ func New(db *store.Postgres, codes *auth.Codes, opts Options) *echo.Echo {
 		e.IPExtractor = echo.ExtractIPFromXFFHeader()
 	}
 	e.Use(middleware.Recover())
+	if opts.LogRequests {
+		e.Use(requestLogger(opts.Logger))
+	}
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{Limit: "1M", Skipper: largeBodyRoute}))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: opts.CORSOrigins,
@@ -84,6 +89,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	v1.POST("/me/notifications/:id/read", s.readNotification, s.requireAuth)
 	v1.GET("/events", s.listEvents)
 	v1.GET("/events/:id", s.getPublicEvent)
+	v1.GET("/event-images/:organizerId/:name", s.eventImage)
 	v1.POST("/events/:id/register", s.register, s.requireAuth)
 	v1.GET("/events/:id/promo", s.getPromo)
 	v1.GET("/events/:id/seating", s.getPublicSeating)
@@ -114,6 +120,7 @@ func (s *Server) routes(v1 *echo.Group) {
 	organizer.GET("/profile", s.getOrganizer, s.requireOrganizer)
 	organizer.PUT("/profile", s.updateOrganizer, s.requireOrganizer)
 	organizer.GET("/payouts", s.listOrganizerPayouts, s.requireOrganizer)
+	organizer.POST("/event-images", s.uploadEventImage, s.requireOrganizer, middleware.BodyLimit(eventImageBodyLimit))
 	s.organizerEventRoutes(organizer.Group("/events", s.requireOrganizer))
 }
 

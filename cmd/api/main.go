@@ -82,6 +82,7 @@ func run(logger *slog.Logger) error {
 		Logger:      logger,
 		WebURL:      cfg.WebURL,
 		TrustProxy:  cfg.TrustProxy,
+		LogRequests: cfg.LogRequests,
 		Files:       files,
 	})
 

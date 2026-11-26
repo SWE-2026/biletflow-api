@@ -30,7 +30,7 @@ func isMultipart(c echo.Context) bool {
 }
 
 func largeBodyRoute(c echo.Context) bool {
-	return c.Path() == supportMessagePath && isMultipart(c)
+	return (c.Path() == supportMessagePath || c.Path() == eventImageUploadPath) && isMultipart(c)
 }
 
 func cleanFileName(name string) string {

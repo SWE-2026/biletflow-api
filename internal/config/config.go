@@ -24,6 +24,8 @@ type Config struct {
 	AdminEmails []string
 	WebURL      string
 	TrustProxy  bool
+	// LogRequests logs every request's method, path, status and duration (debugging aid).
+	LogRequests bool
 	SMTP        SMTP
 	S3          S3
 }
@@ -55,6 +57,7 @@ func Load() (Config, error) {
 		AdminEmails: splitList(strings.ToLower(os.Getenv("ADMIN_EMAILS"))),
 		WebURL:      strings.TrimRight(valueOr(os.Getenv("PUBLIC_WEB_URL"), "http://localhost:5173"), "/"),
 		TrustProxy:  os.Getenv("TRUST_PROXY") == "true",
+		LogRequests: os.Getenv("LOG_REQUESTS") == "true",
 		SMTP: SMTP{
 			Host:     os.Getenv("SMTP_HOST"),
 			Username: os.Getenv("SMTP_USERNAME"),

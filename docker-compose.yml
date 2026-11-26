@@ -48,6 +48,7 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:5173}
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      LOG_REQUESTS: ${LOG_REQUESTS:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}

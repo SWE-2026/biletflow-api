@@ -1,12 +1,31 @@
 package httpapi
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/SWE-2026/biletflow-api/internal/auth"
 	"github.com/SWE-2026/biletflow-api/internal/store"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
+
+// requestLogger logs each request's method, path, status and duration. It never logs the query
+// string, headers or body, which can carry tokens, one-time codes, emails or QR tokens.
+func requestLogger(logger *slog.Logger) echo.MiddlewareFunc {
+	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		HandleError: true, // run the error handler first so the logged status is the real one
+		LogMethod:   true,
+		LogURIPath:  true,
+		LogStatus:   true,
+		LogLatency:  true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			logger.InfoContext(c.Request().Context(), "request",
+				"method", v.Method, "path", v.URIPath, "status", v.Status, "ms", v.Latency.Milliseconds())
+			return nil
+		},
+	})
+}
 
 const (
 	ctxUser      = "user"

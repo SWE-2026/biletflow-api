@@ -104,6 +104,8 @@ Both sign-in styles reach the same account, matched by email. `/auth` is rate-li
 | GET | `/organizer/profile` 🔒 | — | `{organizer}`; organizer only |
 | PUT | `/organizer/profile` 🔒 | Organizer input | `{organizer}`; full replacement, organizer only |
 | GET | `/organizer/payouts` 🔒 | — | `{payouts}`: the organizer's demo payouts, newest first |
+| POST | `/organizer/event-images` 🔒 | multipart `file` | 201 `{url}`: stores an event photo; organizer only, see Event input |
+| GET | `/event-images/:organizerId/:name` | — | the uploaded photo, public and cacheable |
 | POST | `/organizer/events` 🔒 | Event input | 201 `{event}` in `draft` state |
 | GET | `/organizer/events?phase=` 🔒 | — | `{events}`: current organizer's events, all states; optional `phase` filter |
 | GET | `/organizer/events/:id` 🔒 | — | `{event}` owned by current organizer |
@@ -171,7 +173,9 @@ venueAddress, timezone, visibility, capacity, startsAt, endsAt, registrationOpen
 registrationClosesAt?, refundPolicy?}`. All fields except those marked `?` are required; `description`
 and `refundPolicy` may be empty. `refundPolicy` is free text up to 2000 characters shown to buyers.
 `imageUrl` is the cover image, an HTTP(S) URL or `null`; `imageUrls` lists up to 10 more HTTP(S)
-image URLs for the event gallery (SRS 4.2) and defaults to `[]`. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
+image URLs for the event gallery (SRS 4.2) and defaults to `[]`. Organizers can upload photos with
+`POST /organizer/event-images` (one PNG, JPEG, GIF or WebP up to 8 MB in the multipart field `file`;
+anything else is 400 `validation_failed` on `file`) and put the returned `url` in either field. `capacity` is 1–1,000,000. `endsAt` must follow `startsAt`;
 registration close, when present, follows registration open and precedes the event start. Both PUT
 routes replace the complete editable resource rather than applying a partial patch. `capacity`
 cannot drop below the sum of the event's ticket type quantities (409 `capacity_exceeded`).
